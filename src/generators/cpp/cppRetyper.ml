@@ -395,10 +395,18 @@ let expression ctx request_type function_args function_type expression_tree forI
         let new_ctx, new_expr = retype acc_ctx t arg in
         new_ctx, new_expr :: acc_exprs
       in
-      let retyper_ctx, retyped_exprs =
-        List.fold_left2 folder (retyper_ctx, []) args arg_types
+      let rec fold_safe ctx acc args arg_types =
+        match args, arg_types with
+        | [], [] -> ctx, List.rev acc
+        | a::as_, t::ts ->
+            let ctx, e = folder (ctx, []) a t in
+            fold_safe ctx (e :: acc) as_ ts
+        | a::as_, [] ->
+            let ctx, e = retype ctx TCppDynamic a in
+            fold_safe ctx (e :: acc) as_ []
+        | [], t::ts -> fold_safe ctx acc [] ts
       in
-      retyper_ctx, List.rev retyped_exprs
+      fold_safe retyper_ctx [] args arg_types
     in
 
     let retyper_ctx, retypedExpr, retypedType =
