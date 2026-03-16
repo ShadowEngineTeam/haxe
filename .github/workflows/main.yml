@@ -389,10 +389,23 @@ jobs:
       - name: Build Haxe
         run: |
           set -ex
-          eval $(opam env)
-          opam config exec -- make -s STATICLINK=1 "LIB_PARAMS=\"/usr/local/lib/libz.a\" \"/usr/local/lib/libpcre2-8.a\" \"/usr/local/lib/libmbedtls.a\" \"/usr/local/lib/libmbedcrypto.a\" \"/usr/local/lib/libmbedx509.a\"" haxe
-          opam config exec -- make -s haxelib
-          make -s package_unix package_installer_mac
+          if [ "${{ matrix.os }}" = "macos-14" ]; then
+            arch -x86_64 /bin/bash -c "
+              eval \$(opam env)
+              opam config exec -- make -s STATICLINK=1 \
+                \"LIB_PARAMS='/usr/local/lib/libz.a /usr/local/lib/libpcre2-8.a /usr/local/lib/libmbedtls.a /usr/local/lib/libmbedcrypto.a /usr/local/lib/libmbedx509.a'\" \
+                haxe
+              opam config exec -- make -s haxelib
+              make -s package_unix package_installer_mac
+            "
+          else
+            eval $(opam env)
+            opam config exec -- make -s STATICLINK=1 \
+              "LIB_PARAMS='/usr/local/lib/libz.a /usr/local/lib/libpcre2-8.a /usr/local/lib/libmbedtls.a /usr/local/lib/libmbedcrypto.a /usr/local/lib/libmbedx509.a'" \
+              haxe
+            opam config exec -- make -s haxelib
+            make -s package_unix package_installer_mac
+          fi
           ls -l out
           otool -L ./haxe
           otool -L ./haxelib
