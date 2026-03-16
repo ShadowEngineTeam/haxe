@@ -403,7 +403,7 @@ let expression ctx request_type function_args function_type expression_tree forI
             fold_safe ctx (e :: acc) as_ ts
         | a::as_, [] ->
             let ctx, e = retype ctx TCppDynamic a in
-            fold_safe ctx (e :: acc) as_ []
+            fold_safe ctx ([e] :: acc) as_ []
         | [], t::ts -> fold_safe ctx acc [] ts
       in
       fold_safe retyper_ctx [] args arg_types
