@@ -391,14 +391,14 @@ let expression ctx request_type function_args function_type expression_tree forI
       { cppexpr = newExpr; cpptype = newType; cpppos = expr.epos }
     in
     let retype_function_args retyper_ctx args arg_types =
-      let folder (acc_ctx, acc_exprs) t arg =
+      let folder (acc_ctx, acc_exprs) arg t =
         let new_ctx, new_expr = retype acc_ctx t arg in
         new_ctx, new_expr :: acc_exprs
       in
-
-      arg_types
-        |> ExtList.List.fold_left2 folder (retyper_ctx, []) args
-        |> fun (ctx, acc) -> (ctx, List.rev acc)
+      let retyper_ctx, retyped_exprs =
+        List.fold_left2 folder (retyper_ctx, []) args arg_types
+      in
+      retyper_ctx, List.rev retyped_exprs
     in
 
     let retyper_ctx, retypedExpr, retypedType =
