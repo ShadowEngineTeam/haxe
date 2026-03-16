@@ -296,10 +296,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-14, macos-13]
+        os: [macos-15, macos-14]
     runs-on: ${{ matrix.os }}
     env:
-      PLATFORM: mac${{ matrix.os == 'macos-14' && '-arm64' || '' }}
+      PLATFORM: mac${{ matrix.os == 'macos-15' && '-arm64' || '' }}
       OPAMYES: 1
       MACOSX_DEPLOYMENT_TARGET: 10.13
     steps:
@@ -362,14 +362,25 @@ jobs:
         if: steps.cache-opam.outputs.cache-hit != 'true'
         run: |
           set -ex
-          opam init -c ${{ env.OCAML_VERSION }}
-          opam update
-          eval $(opam env)
-          opam env
-          opam pin add haxe . --no-action
-          opam install haxe --deps-only --assume-depexts
-          opam list
-          ocamlopt -v
+          if [ "${{ matrix.os }}" = "macos-14" ]; then
+            arch -x86_64 /bin/bash -c "
+              opam init -c ${{ env.OCAML_VERSION }}
+              opam update
+              eval \$(opam env)
+              opam pin add haxe . --no-action
+              opam install haxe --deps-only --assume-depexts
+              opam list
+              ocamlopt -v
+            "
+          else
+            opam init -c ${{ env.OCAML_VERSION }}
+            opam update
+            eval $(opam env)
+            opam pin add haxe . --no-action
+            opam install haxe --deps-only --assume-depexts
+            opam list
+            ocamlopt -v
+          fi
 
       - name: Set ADD_REVISION=1 for non-release
         if: ${{ !startsWith(github.ref, 'refs/tags/') }}
