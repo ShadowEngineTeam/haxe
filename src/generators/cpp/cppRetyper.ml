@@ -391,7 +391,7 @@ let expression ctx request_type function_args function_type expression_tree forI
       { cppexpr = newExpr; cpptype = newType; cpppos = expr.epos }
     in
     let retype_function_args retyper_ctx args arg_types =
-      let folder (acc_ctx, acc_exprs) arg t =
+      let folder (acc_ctx, acc_exprs) t arg =
         let new_ctx, new_expr = retype acc_ctx t arg in
         new_ctx, new_expr :: acc_exprs
       in
