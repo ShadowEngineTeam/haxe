@@ -137,7 +137,7 @@ jobs:
           path: ~/.opam/
           key: ${{ runner.os }}-${{ env.OCAML_VERSION }}-${{ hashFiles('./haxe.opam', './libs/') }}-1
 
-      - name: Install Neko from S3
+      - name: Install Neko from GitHub releases
         run: |
           set -ex
 
@@ -237,7 +237,7 @@ jobs:
           path: ~/.opam/
           key: arm-${{ runner.os }}-${{ env.OCAML_VERSION }}-${{ hashFiles('./haxe.opam', './libs/') }}-1
 
-      - name: Install Neko from S3
+      - name: Install Neko from GitHub releases
         run: |
           set -ex
 
@@ -330,7 +330,7 @@ jobs:
           path: ~/.opam/
           key: ${{ matrix.os }}-${{ env.OCAML_VERSION }}-${{ hashFiles('./haxe.opam', './libs/') }}-1
 
-      - name: Install Neko from S3
+      - name: Install Neko from GitHub releases
         run: |
           set -ex
 
@@ -357,21 +357,23 @@ jobs:
           PCRE2_VERSION: 10.42
         run: |
           set -ex
+          export CFLAGS="-mmacosx-version-min=11.0"
+          export MACOSX_DEPLOYMENT_TARGET=11.0
           brew update
           brew bundle --file=tests/Brewfile --no-upgrade
           curl -L https://github.com/madler/zlib/releases/download/v$ZLIB_VERSION/zlib-$ZLIB_VERSION.tar.gz | tar xz
           cd zlib-$ZLIB_VERSION
           ./configure
-          sudo make && sudo make install
+          sudo -E make && sudo -E make install
           cd ..
           curl -L https://github.com/ARMmbed/mbedtls/archive/v$MBEDTLS_VERSION.tar.gz | tar xz
           cd mbedtls-$MBEDTLS_VERSION
-          sudo make && sudo make install
+          sudo -E make && sudo -E make install
           cd ..
           curl -L https://github.com/PCRE2Project/pcre2/releases/download/pcre2-$PCRE2_VERSION/pcre2-$PCRE2_VERSION.tar.gz | tar xz
           cd pcre2-$PCRE2_VERSION
           ./configure --enable-unicode --enable-pcre2-8 --enable-pcre2-16 --enable-pcre2-32 --enable-unicode-properties --enable-pcre2grep-libz --enable-pcre2grep-libbz2 --enable-jit
-          sudo make && sudo make install
+          sudo -E make && sudo -E make install
           cd ..
 
       - name: Install OCaml libraries
@@ -395,7 +397,7 @@ jobs:
           set -ex
           eval $(opam env)
           opam config exec -- make -s STATICLINK=1 \
-            LIB_PARAMS='/usr/local/lib/libz.a /usr/local/lib/libpcre2-8.a /usr/local/lib/libmbedtls.a /usr/local/lib/libmbedcrypto.a /usr/local/lib/libmbedx509.a' \
+            LIB_PARAMS='/usr/local/lib/libz.a /usr/local/lib/libpcre2-8.a /usr/local/lib/libmbedtls.a /usr/local/lib/libmbedcrypto.a /usr/local/lib/libmbedx509.a -cclib "-framework CoreFoundation" -cclib "-framework Security"' \
             haxe
           opam config exec -- make -s haxelib
           make -s package_unix package_installer_mac
