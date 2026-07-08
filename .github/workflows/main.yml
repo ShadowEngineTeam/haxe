@@ -60,7 +60,7 @@ jobs:
   linux-build:
     strategy:
       matrix:
-        arch: [x86_64, arm64, armhf]
+        arch: [x86_64, arm64]
 
     runs-on: ${{ matrix.arch == 'x86_64' && 'ubuntu-22.04' || matrix.arch == 'arm64' && 'ubuntu-22.04-arm' ||  matrix.arch == 'armhf' && 'ubuntu-22.04-arm' || 'ubuntu-22.04' }}
     env:
