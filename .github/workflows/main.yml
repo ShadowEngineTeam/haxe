@@ -393,7 +393,7 @@ jobs:
             arch -x86_64 /bin/bash -c "
               eval \$(opam env)
               opam config exec -- make -s STATICLINK=1 \
-                \"LIB_PARAMS='/usr/local/lib/libz.a /usr/local/lib/libpcre2-8.a /usr/local/lib/libmbedtls.a /usr/local/lib/libmbedcrypto.a /usr/local/lib/libmbedx509.a'\" \
+                LIB_PARAMS='/usr/local/lib/libz.a /usr/local/lib/libpcre2-8.a /usr/local/lib/libmbedtls.a /usr/local/lib/libmbedcrypto.a /usr/local/lib/libmbedx509.a' \
                 haxe
               opam config exec -- make -s haxelib
               make -s package_unix package_installer_mac
@@ -401,7 +401,7 @@ jobs:
           else
             eval $(opam env)
             opam config exec -- make -s STATICLINK=1 \
-              "LIB_PARAMS='/usr/local/lib/libz.a /usr/local/lib/libpcre2-8.a /usr/local/lib/libmbedtls.a /usr/local/lib/libmbedcrypto.a /usr/local/lib/libmbedx509.a'" \
+              LIB_PARAMS='/usr/local/lib/libz.a /usr/local/lib/libpcre2-8.a /usr/local/lib/libmbedtls.a /usr/local/lib/libmbedcrypto.a /usr/local/lib/libmbedx509.a' \
               haxe
             opam config exec -- make -s haxelib
             make -s package_unix package_installer_mac
