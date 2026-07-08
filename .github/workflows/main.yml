@@ -63,9 +63,6 @@ jobs:
         arch: [x86_64, arm64, armhf]
 
     runs-on: ${{ matrix.arch == 'x86_64' && 'ubuntu-22.04' || matrix.arch == 'arm64' && 'ubuntu-22.04-arm' ||  matrix.arch == 'armhf' && 'ubuntu-22.04-arm' || 'ubuntu-22.04' }}
-
-    container: ${{ matrix.arch == 'armhf' && 'arm32v7/ubuntu:22.04' || '' }}
-
     env:
       PLATFORM: linux${{ matrix.arch == 'arm64' && '-arm' || matrix.arch == 'armhf' && '-armhf' || '' }}64
       OPAMYES: 1
@@ -87,8 +84,7 @@ jobs:
       - name: Install dependencies
         run: |
           set -ex
-          apt-get update -qqy || sudo apt-get update -qqy
-          apt-get install -qqy opam libpcre2-dev zlib1g-dev libgtk2.0-dev libmbedtls-dev ninja-build build-essential curl git m4 || \
+          sudo apt-get update -qqy
           sudo apt-get install -qqy opam libpcre2-dev zlib1g-dev libgtk2.0-dev libmbedtls-dev ninja-build build-essential curl git m4
 
       - name: Install OCaml libraries
