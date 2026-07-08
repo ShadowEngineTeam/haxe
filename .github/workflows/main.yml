@@ -1,8 +1,8 @@
+# DO NOT EDIT. Generated from /extra/github-actions
 # TODO: support skip ci (https://github.community/t/github-actions-does-not-respect-skip-ci/17325/8)
 
 name: CI
-on:
-  workflow_dispatch:
+on: workflow_dispatch
 
 env:
   OCAML_VERSION: 4.14.0
@@ -15,22 +15,76 @@ jobs:
   windows64-build:
     runs-on: windows-latest
     env:
+      ACTIONS_ALLOW_UNSECURE_COMMANDS: true
       PLATFORM: windows64
       ARCH: 64
       MINGW_ARCH: x86_64
-      CYG_ROOT: C:\cygwin
+      CYG_ROOT: D:\cygwin
     steps:
       - uses: actions/checkout@main
         with:
           submodules: recursive
 
-      - uses: repolevedavaj/install-nsis@v1.2.1
+      - name: choco install nsis
+        uses: nick-invision/retry@v3
         with:
-          nsis-version: '3.12'
+          timeout_minutes: 10
+          max_attempts: 10
+          command: choco install --no-progress nsis.portable --version 3.09 -y
 
-      - uses: ./.github/actions/setup-neko
+      - name: choco install things
+        shell: pwsh
+        run: choco install --no-progress curl wget 7zip.portable -y
 
-      - uses: ./.github/actions/setup-ocaml-windows
+      - name: Prepend Chocolatey path
+        shell: pwsh
+        run: Write-Host "::add-path::C:\ProgramData\chocolatey\bin"
+
+      - name: Install Neko from GitHub releases
+        shell: pwsh
+        run: |
+          Invoke-WebRequest https://github.com/ShadowEngineTeam/neko/releases/download/v2-4-1/neko-2.4.1-win64.zip -OutFile $env:RUNNER_TEMP/neko_latest.zip
+          Expand-Archive $env:RUNNER_TEMP/neko_latest.zip -DestinationPath $env:RUNNER_TEMP
+          $NEKOPATH = Get-ChildItem $env:RUNNER_TEMP/neko-*-*
+          echo "$NEKOPATH" >> $env:GITHUB_PATH
+          echo "NEKOPATH=$NEKOPATH" >> $env:GITHUB_ENV
+
+      - name: Print Neko version
+        run: neko -version 2>&1
+
+      - name: Setup ocaml
+      # Lock to 3.2.19 to work around an issue with 32-bit libraries getting installed
+        uses: ocaml/setup-ocaml@3d85bf33a66e089149cd1e9c75da7b9cb6d9d3a7
+        with:
+          ocaml-compiler: ${{ env.OCAML_VERSION }}
+          opam-local-packages: |
+            haxe.opam
+
+      - name: Install dependencies
+        shell: pwsh
+        env:
+          MBEDTLS_VERSION: 2.16.3
+        run: |
+          curl.exe -fsSL -o "libmbedtls.tar.xz" --retry 3 `
+            https://github.com/Simn/mingw64-mbedtls/releases/download/${{ env.MBEDTLS_VERSION }}/mingw64-${{ env.MINGW_ARCH }}-mbedtls-${{ env.MBEDTLS_VERSION }}-1.tar.xz
+          ${{ env.CYG_ROOT }}\bin\tar.exe -C ${{ env.CYG_ROOT }} -xvf libmbedtls.tar.xz
+
+      - name: Install OCaml libraries
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 10
+          max_attempts: 10
+          retry_on: timeout
+          shell: pwsh
+          command: |
+            Set-PSDebug -Trace 1
+            # stop after any command returns an error
+            $PSNativeCommandUseErrorActionPreference = $true
+            $ErrorActionPreference = 'Stop'
+            # see: https://github.com/aantron/luv/issues/162
+            $env:PATH="${env:CYG_ROOT}\bin;${env:CYG_ROOT}\usr\x86_64-w64-mingw32\bin;${env:PATH}"
+            opam install haxe --deps-only
+            opam list
 
       - name: Set ADD_REVISION=1 for non-release
         if: ${{ !startsWith(github.ref, 'refs/tags/') }}
@@ -41,13 +95,14 @@ jobs:
         shell: pwsh
         run: |
           Set-PSDebug -Trace 1
+          # stop after any command returns an error
           $PSNativeCommandUseErrorActionPreference = $true
           $ErrorActionPreference = 'Stop'
           opam exec -- make -s -f Makefile.win -j"$env:NUMBER_OF_PROCESSORS" haxe
           opam exec -- make -s -f Makefile.win haxelib
           opam exec -- make -f Makefile.win echo_package_files package_bin package_installer_win package_choco
-          opam exec -- cygcheck ./haxe.exe
-          opam exec -- cygcheck ./haxelib.exe
+          cygcheck ./haxe.exe
+          cygcheck ./haxelib.exe
           ls ./out
 
       - name: Upload artifact
@@ -58,15 +113,10 @@ jobs:
 
 
   linux-build:
-    strategy:
-      matrix:
-        arch: [x86_64, arm64]
-
-    runs-on: ${{ matrix.arch == 'x86_64' && 'ubuntu-22.04' || matrix.arch == 'arm64' && 'ubuntu-22.04-arm' ||  matrix.arch == 'armhf' && 'ubuntu-22.04-arm' || 'ubuntu-22.04' }}
+    runs-on: ubuntu-22.04
     env:
-      PLATFORM: linux${{ matrix.arch == 'arm64' && '-arm' || matrix.arch == 'armhf' && '-armhf' || '' }}64
+      PLATFORM: linux64
       OPAMYES: 1
-
     steps:
       - uses: actions/checkout@main
         with:
@@ -77,15 +127,133 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.opam/
-          key: ${{ runner.os }}-${{ matrix.arch }}-${{ env.OCAML_VERSION }}-${{ hashFiles('./haxe.opam', './libs/') }}-1
+          key: ${{ runner.os }}-${{ env.OCAML_VERSION }}-${{ hashFiles('./haxe.opam', './libs/') }}-1
 
-      - uses: ./.github/actions/setup-neko
+      - name: Install Neko from S3
+        run: |
+          set -ex
+
+          curl -sSL https://github.com/ShadowEngineTeam/neko/releases/download/v2-4-1/neko-2.4.1-linux64.tar.gz -o $RUNNER_TEMP/neko_latest.tar.gz
+          tar -xf $RUNNER_TEMP/neko_latest.tar.gz -C $RUNNER_TEMP
+          NEKOPATH=`echo $RUNNER_TEMP/neko-*-*`
+          sudo mkdir -p /usr/local/bin
+          sudo mkdir -p /usr/local/include
+          sudo mkdir -p /usr/local/lib/neko
+          sudo ln -s $NEKOPATH/{neko,nekoc,nekoml,nekotools}  /usr/local/bin/
+          sudo ln -s $NEKOPATH/libneko.*                      /usr/local/lib/
+          sudo ln -s $NEKOPATH/include/*                      /usr/local/include/
+          sudo ln -s $NEKOPATH/*.ndll                         /usr/local/lib/neko/
+          echo "NEKOPATH=$NEKOPATH" >> $GITHUB_ENV
+
+      - name: Print Neko version
+        run: neko -version 2>&1
+
 
       - name: Install dependencies
         run: |
           set -ex
           sudo apt-get update -qqy
-          sudo apt-get install -qqy opam libpcre2-dev zlib1g-dev libgtk2.0-dev libmbedtls-dev ninja-build build-essential curl git m4
+          sudo apt-get install -qqy darcs bubblewrap ocaml-nox libpcre2-dev zlib1g-dev libgtk2.0-dev libmbedtls-dev ninja-build
+          curl -sSL https://github.com/ocaml/opam/releases/download/2.3.0/opam-2.3.0-x86_64-linux -o $RUNNER_TEMP/opam
+          sudo install $RUNNER_TEMP/opam /usr/local/bin/opam
+
+      - name: Install OCaml libraries
+        if: steps.cache-opam.outputs.cache-hit != 'true'
+        run: |
+          set -ex
+          opam init -c ${{ env.OCAML_VERSION }}
+          opam update
+          opam pin add haxe . --no-action
+          opam install haxe --deps-only --assume-depexts
+          opam list
+          ocamlopt -v
+
+      - name: Set ADD_REVISION=1 for non-release
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        run: echo "ADD_REVISION=1" >> $GITHUB_ENV
+
+      - name: Build Haxe
+        run: |
+          set -ex
+          eval $(opam env)
+          opam config exec -- make -s -j`nproc` STATICLINK=1 haxe
+          opam config exec -- make -s haxelib
+          make -s package_unix
+          ls -l out
+          ldd -v ./haxe
+          ldd -v ./haxelib
+
+      # https://stackoverflow.com/questions/58033366/how-to-get-current-branch-within-github-actions
+      - name: Extract branch name
+        id: extract_branch
+        shell: bash
+        run: echo "branch=${GITHUB_REF#refs/heads/}" >> $GITHUB_OUTPUT
+
+      - name: Build xmldoc
+        run: |
+          set -ex
+          make -s xmldoc
+          cat >extra/doc/info.json <<EOL
+            {
+              "commit": "$GITHUB_SHA",
+              "branch": "${{ steps.extract_branch.outputs.branch }}"
+            }
+          EOL
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linuxBinaries
+          path: out
+
+      - name: Upload xmldoc artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: xmldoc
+          path: extra/doc
+
+  linux-arm64-build:
+    runs-on: ubuntu-22.04-arm
+    env:
+      PLATFORM: linux-arm64
+      OPAMYES: 1
+    steps:
+      - uses: actions/checkout@main
+        with:
+          submodules: recursive
+
+      - name: Cache opam
+        id: cache-opam
+        uses: actions/cache@v4
+        with:
+          path: ~/.opam/
+          key: arm-${{ runner.os }}-${{ env.OCAML_VERSION }}-${{ hashFiles('./haxe.opam', './libs/') }}-1
+
+      - name: Install Neko from S3
+        run: |
+          set -ex
+
+          curl -sSL https://github.com/ShadowEngineTeam/neko/releases/download/v2-4-1/neko-2.4.1-linux-arm64.tar.gz -o $RUNNER_TEMP/neko_latest.tar.gz
+          tar -xf $RUNNER_TEMP/neko_latest.tar.gz -C $RUNNER_TEMP
+          NEKOPATH=`echo $RUNNER_TEMP/neko-*-*`
+          sudo mkdir -p /usr/local/bin
+          sudo mkdir -p /usr/local/include
+          sudo mkdir -p /usr/local/lib/neko
+          sudo ln -s $NEKOPATH/{neko,nekoc,nekoml,nekotools}  /usr/local/bin/
+          sudo ln -s $NEKOPATH/libneko.*                      /usr/local/lib/
+          sudo ln -s $NEKOPATH/include/*                      /usr/local/include/
+          sudo ln -s $NEKOPATH/*.ndll                         /usr/local/lib/neko/
+          echo "NEKOPATH=$NEKOPATH" >> $GITHUB_ENV
+
+      - name: Print Neko version
+        run: neko -version 2>&1
+
+
+      - name: Install dependencies
+        run: |
+          set -ex
+          sudo apt-get update -qqy
+          sudo apt-get install -qqy opam libpcre2-dev zlib1g-dev libgtk2.0-dev libmbedtls-dev ninja-build
 
       - name: Install OCaml libraries
         if: steps.cache-opam.outputs.cache-hit != 'true'
@@ -109,9 +277,10 @@ jobs:
           opam config exec -- make -s haxelib
           make -s package_unix
           ls -l out
-          ldd -v ./haxe || true
-          ldd -v ./haxelib || true
+          ldd -v ./haxe
+          ldd -v ./haxelib
 
+      # https://stackoverflow.com/questions/58033366/how-to-get-current-branch-within-github-actions
       - name: Extract branch name
         id: extract_branch
         shell: bash
@@ -120,39 +289,19 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: linux${{ matrix.arch == 'arm64' && 'Arm64' || matrix.arch == 'armhf' && 'Arm' || '' }}Binaries
+          name: linuxArm64Binaries
           path: out
-
-      - name: Build xmldoc
-        if: matrix.arch == 'x86_64'
-        run: |
-          set -ex
-          make -s xmldoc
-          cat >extra/doc/info.json <<EOL
-            {
-              "commit": "$GITHUB_SHA",
-              "branch": "${{ steps.extract_branch.outputs.branch }}"
-            }
-          EOL
-
-      - name: Upload xmldoc artifact
-        if: matrix.arch == 'x86_64'
-        uses: actions/upload-artifact@v4
-        with:
-          name: xmldoc
-          path: extra/doc
-
 
   mac-build:
     strategy:
       fail-fast: false
       matrix:
-        arch: [arm64, x86_64]
-    runs-on: macos-latest
+        os: [macos-26-arm64, macos-15-intel]
+    runs-on: ${{ matrix.os }}
     env:
-      PLATFORM: mac${{ matrix.arch == 'arm64' && '-arm64' || '' }}
+      PLATFORM: mac${{ matrix.os == 'macos-26-arm64' && '-arm64' || '' }}
       OPAMYES: 1
-      MACOSX_DEPLOYMENT_TARGET: ${{ matrix.arch == 'arm64' && 11.0 || 10.13 }}
+      MACOSX_DEPLOYMENT_TARGET: 10.13
     steps:
       - uses: actions/checkout@main
         with:
@@ -163,36 +312,75 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.opam/
-          key: macos-${{ matrix.arch }}-${{ env.OCAML_VERSION }}-${{ hashFiles('./haxe.opam', './libs/') }}-1
+          key: ${{ matrix.os }}-${{ env.OCAML_VERSION }}-${{ hashFiles('./haxe.opam', './libs/') }}-1
 
-      - uses: ./.github/actions/setup-neko
+      - name: Install Neko from S3
+        run: |
+          set -ex
+
+          curl -sSL https://github.com/ShadowEngineTeam/neko/releases/download/v2-4-1/neko-2.4.1-osx-universal.tar.gz -o $RUNNER_TEMP/neko_latest.tar.gz
+          tar -xf $RUNNER_TEMP/neko_latest.tar.gz -C $RUNNER_TEMP
+          NEKOPATH=`echo $RUNNER_TEMP/neko-*-*`
+          sudo mkdir -p /usr/local/bin
+          sudo mkdir -p /usr/local/include
+          sudo mkdir -p /usr/local/lib/neko
+          sudo ln -s $NEKOPATH/{neko,nekoc,nekoml,nekotools}  /usr/local/bin/
+          sudo ln -s $NEKOPATH/libneko.*                      /usr/local/lib/
+          sudo ln -s $NEKOPATH/include/*                      /usr/local/include/
+          sudo ln -s $NEKOPATH/*.ndll                         /usr/local/lib/neko/
+          echo "NEKOPATH=$NEKOPATH" >> $GITHUB_ENV
+
+      - name: Print Neko version
+        run: neko -version 2>&1
 
       - name: Install dependencies
         env:
+          # For compatibility with macOS 10.13
           ZLIB_VERSION: 1.3.1
-          MBEDTLS_VERSION: 3.6.4
-          PCRE2_VERSION: 10.45
-          CMAKE_BUILD_TYPE: Release
-          CMAKE_GENERATOR: Ninja
+          MBEDTLS_VERSION: 2.28.5
+          PCRE2_VERSION: 10.42
         run: |
           set -ex
           brew update
           brew bundle --file=tests/Brewfile --no-upgrade
-
-      - name: Install Opam
-        run: |
-          curl -sSL https://github.com/ocaml/opam/releases/download/2.3.0/opam-2.3.0-${{ matrix.arch }}-macos -o $RUNNER_TEMP/opam
-          sudo install $RUNNER_TEMP/opam /usr/local/bin/opam
+          curl -L https://github.com/madler/zlib/releases/download/v$ZLIB_VERSION/zlib-$ZLIB_VERSION.tar.gz | tar xz
+          cd zlib-$ZLIB_VERSION
+          ./configure
+          sudo make && sudo make install
+          cd ..
+          curl -L https://github.com/ARMmbed/mbedtls/archive/v$MBEDTLS_VERSION.tar.gz | tar xz
+          cd mbedtls-$MBEDTLS_VERSION
+          sudo make && sudo make install
+          cd ..
+          curl -L https://github.com/PCRE2Project/pcre2/releases/download/pcre2-$PCRE2_VERSION/pcre2-$PCRE2_VERSION.tar.gz | tar xz
+          cd pcre2-$PCRE2_VERSION
+          ./configure --enable-unicode --enable-pcre2-8 --enable-pcre2-16 --enable-pcre2-32 --enable-unicode-properties --enable-pcre2grep-libz --enable-pcre2grep-libbz2 --enable-jit
+          sudo make && sudo make install
+          cd ..
 
       - name: Install OCaml libraries
         if: steps.cache-opam.outputs.cache-hit != 'true'
         run: |
           set -ex
-          opam init -c ${{ env.OCAML_VERSION }}
-          opam update
-          eval $(opam env)
-          opam pin add haxe . --no-action
-          opam install haxe --deps-only --assume-depexts
+          if [ "${{ matrix.os }}" = "macos-14" ]; then
+            arch -x86_64 /bin/bash -c "
+              opam init -c ${{ env.OCAML_VERSION }}
+              opam update
+              eval \$(opam env)
+              opam pin add haxe . --no-action
+              opam install haxe --deps-only --assume-depexts
+              opam list
+              ocamlopt -v
+            "
+          else
+            opam init -c ${{ env.OCAML_VERSION }}
+            opam update
+            eval $(opam env)
+            opam pin add haxe . --no-action
+            opam install haxe --deps-only --assume-depexts
+            opam list
+            ocamlopt -v
+          fi
 
       - name: Set ADD_REVISION=1 for non-release
         if: ${{ !startsWith(github.ref, 'refs/tags/') }}
@@ -201,38 +389,51 @@ jobs:
       - name: Build Haxe
         run: |
           set -ex
-          eval $(opam env)
-          opam exec -- make -s STATICLINK=1 haxe
-          opam exec -- make -s haxelib
-          opam exec -- make -s package_unix package_installer_mac
+          if [ "${{ matrix.os }}" = "macos-14" ]; then
+            arch -x86_64 /bin/bash -c "
+              eval \$(opam env)
+              opam config exec -- make -s STATICLINK=1 \
+                \"LIB_PARAMS='/usr/local/lib/libz.a /usr/local/lib/libpcre2-8.a /usr/local/lib/libmbedtls.a /usr/local/lib/libmbedcrypto.a /usr/local/lib/libmbedx509.a'\" \
+                haxe
+              opam config exec -- make -s haxelib
+              make -s package_unix package_installer_mac
+            "
+          else
+            eval $(opam env)
+            opam config exec -- make -s STATICLINK=1 \
+              "LIB_PARAMS='/usr/local/lib/libz.a /usr/local/lib/libpcre2-8.a /usr/local/lib/libmbedtls.a /usr/local/lib/libmbedcrypto.a /usr/local/lib/libmbedx509.a'" \
+              haxe
+            opam config exec -- make -s haxelib
+            make -s package_unix package_installer_mac
+          fi
           ls -l out
+          otool -L ./haxe
+          otool -L ./haxelib
 
       - name: Upload artifact (x64)
-        if: matrix.arch == 'x86_64'
+        if: runner.arch == 'X64'
         uses: actions/upload-artifact@v4
         with:
           name: macX64Binaries
           path: out
 
       - name: Upload artifact (arm)
-        if: matrix.arch == 'arm64'
+        if: runner.arch == 'ARM64'
         uses: actions/upload-artifact@v4
         with:
           name: macArmBinaries
           path: out
 
-
   mac-build-universal:
     needs: mac-build
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@main
-
+      - name: Checkout the repository
+        uses: actions/checkout@main
       - uses: actions/download-artifact@v4
         with:
           name: macX64Binaries
           path: macX64Binaries
-
       - uses: actions/download-artifact@v4
         with:
           name: macArmBinaries
@@ -247,6 +448,8 @@ jobs:
           lipo -create -output haxelib macX64Binaries/haxelib macArmBinaries/haxelib
           make -s package_unix package_installer_mac PACKAGE_INSTALLER_MAC_ARCH=universal
           ls -l out
+          otool -L ./haxe
+          otool -L ./haxelib
 
       - name: Upload artifact (universal)
         uses: actions/upload-artifact@v4
