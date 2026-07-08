@@ -77,7 +77,7 @@ jobs:
             --quiet-mode unattended `
             --no-shortcuts --no-startmenu --no-desktop --no-admin `
             --no-version-check --no-write-registry `
-            --packages perl-IPC-System-Simple,perl-String-ShellQuote
+            --packages bash,coreutils,perl
 
       - name: Install OCaml libraries
         uses: nick-fields/retry@v3
