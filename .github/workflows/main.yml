@@ -297,7 +297,15 @@ jobs:
       fail-fast: false
       matrix:
         os: [macos-26, macos-15-intel]
+        include:
+          - os: macos-26
+            shell: bash
+          - os: macos-15-intel
+            shell: 'arch -x86_64 /bin/bash -eo pipefail {0}'
     runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: ${{ matrix.shell }}
     env:
       PLATFORM: mac${{ matrix.os == 'macos-26-arm64' && '-arm64' || '' }}
       OPAMYES: 1
@@ -362,25 +370,13 @@ jobs:
         if: steps.cache-opam.outputs.cache-hit != 'true'
         run: |
           set -ex
-          if [ "${{ matrix.os }}" = "macos-15-intel" ]; then
-            arch -x86_64 /bin/bash -c "
-              opam init -c ${{ env.OCAML_VERSION }}
-              opam update
-              eval \$(opam env)
-              opam pin add haxe . --no-action
-              opam install haxe --deps-only --assume-depexts
-              opam list
-              ocamlopt -v
-            "
-          else
-            opam init -c ${{ env.OCAML_VERSION }}
-            opam update
-            eval $(opam env)
-            opam pin add haxe . --no-action
-            opam install haxe --deps-only --assume-depexts
-            opam list
-            ocamlopt -v
-          fi
+          opam init -c ${{ env.OCAML_VERSION }}
+          opam update
+          eval $(opam env)
+          opam pin add haxe . --no-action
+          opam install haxe --deps-only --assume-depexts
+          opam list
+          ocamlopt -v
 
       - name: Set ADD_REVISION=1 for non-release
         if: ${{ !startsWith(github.ref, 'refs/tags/') }}
@@ -389,23 +385,12 @@ jobs:
       - name: Build Haxe
         run: |
           set -ex
-          if [ "${{ matrix.os }}" = "macos-14" ]; then
-            arch -x86_64 /bin/bash -c "
-              eval \$(opam env)
-              opam config exec -- make -s STATICLINK=1 \
-                LIB_PARAMS='/usr/local/lib/libz.a /usr/local/lib/libpcre2-8.a /usr/local/lib/libmbedtls.a /usr/local/lib/libmbedcrypto.a /usr/local/lib/libmbedx509.a' \
-                haxe
-              opam config exec -- make -s haxelib
-              make -s package_unix package_installer_mac
-            "
-          else
-            eval $(opam env)
-            opam config exec -- make -s STATICLINK=1 \
-              LIB_PARAMS='/usr/local/lib/libz.a /usr/local/lib/libpcre2-8.a /usr/local/lib/libmbedtls.a /usr/local/lib/libmbedcrypto.a /usr/local/lib/libmbedx509.a' \
-              haxe
-            opam config exec -- make -s haxelib
-            make -s package_unix package_installer_mac
-          fi
+          eval $(opam env)
+          opam config exec -- make -s STATICLINK=1 \
+            LIB_PARAMS='/usr/local/lib/libz.a /usr/local/lib/libpcre2-8.a /usr/local/lib/libmbedtls.a /usr/local/lib/libmbedcrypto.a /usr/local/lib/libmbedx509.a' \
+            haxe
+          opam config exec -- make -s haxelib
+          make -s package_unix package_installer_mac
           ls -l out
           otool -L ./haxe
           otool -L ./haxelib
