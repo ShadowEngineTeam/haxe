@@ -362,7 +362,7 @@ jobs:
         if: steps.cache-opam.outputs.cache-hit != 'true'
         run: |
           set -ex
-          if [ "${{ matrix.os }}" = "macos-14" ]; then
+          if [ "${{ matrix.os }}" = "macos-15-intel" ]; then
             arch -x86_64 /bin/bash -c "
               opam init -c ${{ env.OCAML_VERSION }}
               opam update
