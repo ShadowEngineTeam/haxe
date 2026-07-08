@@ -72,12 +72,10 @@ jobs:
       - name: Install Perl modules for camlp5-buildscripts
         shell: pwsh
         run: |
-          & "${{ env.CYG_ROOT }}\setup-x86_64.exe" `
-            --root "${{ env.CYG_ROOT }}" `
-            --quiet-mode unattended `
-            --no-shortcuts --no-startmenu --no-desktop --no-admin `
-            --no-version-check --no-write-registry `
-            --packages bash,coreutils,perl
+          $env:PATH = "$env:CYG_ROOT\bin;$env:CYG_ROOT\usr\x86_64-w64-mingw32\bin;$env:PATH"
+          Invoke-WebRequest -Uri https://cpanmin.us -OutFile cpanm
+          & "$env:CYG_ROOT\bin\perl.exe" cpanm IPC::System::Simple
+          & "$env:CYG_ROOT\bin\perl.exe" cpanm String::ShellQuote
 
       - name: Install OCaml libraries
         uses: nick-fields/retry@v3
