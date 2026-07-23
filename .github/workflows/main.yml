@@ -120,6 +120,133 @@ jobs:
           path: out
 
 
+  windows-build:
+    runs-on: windows-latest
+    env:
+      ACTIONS_ALLOW_UNSECURE_COMMANDS: true
+      PLATFORM: windows
+      ARCH: 32
+      MINGW_ARCH: i686
+      CYG_ROOT: D:\cygwin
+    steps:
+      - uses: actions/checkout@main
+        with:
+          submodules: recursive
+
+      - name: Use GNU Tar from msys
+        run: |
+          echo "C:\msys64\usr\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          rm C:\msys64\usr\bin\bash.exe
+
+      - name: choco install nsis
+        uses: nick-invision/retry@v3
+        with:
+          timeout_minutes: 10
+          max_attempts: 10
+          command: choco install --no-progress nsis.portable --version 3.09 -y
+
+      - name: choco install things
+        shell: pwsh
+        run: choco install --no-progress curl wget 7zip.portable -y
+
+      - name: Prepend Chocolatey path
+        shell: pwsh
+        run: Write-Host "::add-path::C:\ProgramData\chocolatey\bin"
+
+      # TODO(neko): install a 32-bit Neko build here once one is published
+      # (needed for haxelib bootstrapping and installer/choco packaging)
+
+      - name: Setup ocaml
+        id: ocaml
+        continue-on-error: true
+        uses: kLabz/setup-ocaml@win32
+        with:
+          ocaml-compiler: 4.08.1
+          opam-depext: false
+          opam-repositories: |
+            opam-repository-mingw: https://github.com/ocaml-opam/opam-repository-mingw.git#sunset
+            default: https://github.com/ocaml/opam-repository.git
+          opam-local-packages: |
+            haxe.opam
+          cache-prefix: w32-v1
+
+      # TODO make it work on first try
+      # (when cygwin cache doesn't exist, ocaml install fails with a curl error)
+      - name: Setup ocaml (second chance)
+        if: steps.ocaml.outcome == 'failure'
+        uses: kLabz/setup-ocaml@win32
+        with:
+          ocaml-compiler: 4.08.1
+          opam-depext: false
+          opam-repositories: |
+            opam-repository-mingw: https://github.com/ocaml-opam/opam-repository-mingw.git#sunset
+            default: https://github.com/ocaml/opam-repository.git
+          opam-local-packages: |
+            haxe.opam
+          cache-prefix: w32-v1
+
+      - name: Install dependencies
+        shell: pwsh
+        env:
+          MBEDTLS_VERSION: 2.16.3
+        run: |
+          Set-PSDebug -Trace 1
+          curl.exe -fsSL -o "libmbedtls.tar.xz" --retry 3 `
+            https://github.com/Simn/mingw64-mbedtls/releases/download/${{ env.MBEDTLS_VERSION }}/mingw64-${{ env.MINGW_ARCH }}-mbedtls-${{ env.MBEDTLS_VERSION }}-1.tar.xz
+          & "$($env:CYG_ROOT)/bin/bash.exe" @('-lc', 'curl -L https://cpanmin.us | perl - App::cpanminus')
+          & "$($env:CYG_ROOT)/bin/bash.exe" @('-lc', 'cpanm IPC::System::Simple')
+          & "$($env:CYG_ROOT)/bin/bash.exe" @('-lc', 'cpanm String::ShellQuote')
+          & "$($env:CYG_ROOT)/bin/bash.exe" @('-lc', 'cd "$OLDPWD" && tar -C / -xvf libmbedtls.tar.xz')
+
+      - name: Install OCaml libraries
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 10
+          max_attempts: 10
+          retry_on: timeout
+          shell: pwsh
+          command: |
+            Set-PSDebug -Trace 1
+            # see: https://github.com/aantron/luv/issues/162
+            $env:PATH="${env:CYG_ROOT}\bin;${env:CYG_ROOT}\usr\i686-w64-mingw32\bin;${env:PATH}"
+            opam install haxe --deps-only
+            opam list
+
+      - name: Expose mingw dll files
+        shell: pwsh
+        run: Write-Host "::add-path::${env:CYG_ROOT}/usr/$($env:MINGW_ARCH)-w64-mingw32/sys-root/mingw/bin"
+
+      # required to be able to retrieve the revision
+      - name: Mark directory as safe
+        shell: pwsh
+        run: |
+          Set-PSDebug -Trace 1
+          & "$($env:CYG_ROOT)/bin/bash.exe" @('-lc', 'git config --global --add safe.directory "$OLDPWD"')
+
+      - name: Set ADD_REVISION=1 for non-release
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        shell: pwsh
+        run: echo "ADD_REVISION=1" >> $Env:GITHUB_ENV
+
+      - name: Build Haxe
+        shell: pwsh
+        run: |
+          Set-PSDebug -Trace 1
+          & "$($env:CYG_ROOT)/bin/bash.exe" @('-lc', 'cd "$OLDPWD" && opam config exec -- make -s -f Makefile.win -j`nproc` haxe 2>&1')
+          # TODO(neko): once Neko is available, also build haxelib and packages:
+          #   make -s -f Makefile.win haxelib
+          #   make -f Makefile.win echo_package_files package_bin package_installer_win package_choco
+          & "$($env:CYG_ROOT)/bin/bash.exe" @('-lc', 'cd "$OLDPWD" && cygcheck ./haxe.exe')
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: win${{env.ARCH}}Binaries
+          path: |
+            haxe.exe
+            std
+
+
   linux-build:
     runs-on: ubuntu-22.04
     env:
@@ -298,6 +425,70 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: linuxArm64Binaries
+          path: out
+
+  linux-armv7-build:
+    runs-on: ubuntu-22.04
+    env:
+      PLATFORM: linux-armv7
+      OPAMYES: 1
+    steps:
+      - uses: actions/checkout@main
+        with:
+          submodules: recursive
+
+      - name: Cache opam
+        uses: actions/cache@v4
+        with:
+          path: ~/opam-armv7/
+          key: armv7-${{ env.OCAML_VERSION }}-${{ hashFiles('./haxe.opam', './libs/') }}-1
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm
+
+      - name: Set ADD_REVISION=1 for non-release
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        run: echo "ADD_REVISION=1" >> $GITHUB_ENV
+
+      # There is no GitHub-hosted armv7 runner, so the build runs in an
+      # arm32v7 container through QEMU user emulation. The first run is slow
+      # (the OCaml toolchain is compiled under emulation) but the opam root
+      # is cached between runs.
+      # TODO(neko): the container currently uses the Ubuntu neko package to
+      # satisfy the conf-neko opam dependency and bootstrap haxelib; switch
+      # to a Neko linux-armv7 release download once one is published.
+      - name: Build Haxe (armv7 container)
+        run: |
+          set -ex
+          mkdir -p ~/opam-armv7
+          docker run --rm --platform linux/arm/v7 \
+            -v "$PWD":/haxe -w /haxe \
+            -v ~/opam-armv7:/root/.opam \
+            -e ADD_REVISION -e OPAMYES=1 -e PLATFORM \
+            arm32v7/ubuntu:22.04 bash -ec '
+              export DEBIAN_FRONTEND=noninteractive
+              apt-get update -qqy
+              apt-get install -qqy git make patch unzip build-essential curl ca-certificates opam libpcre2-dev zlib1g-dev libmbedtls-dev neko libneko-dev ninja-build pkg-config
+              git config --global --add safe.directory /haxe
+              if [ ! -d ~/.opam/default ]; then opam init --disable-sandboxing -c ${{ env.OCAML_VERSION }}; fi
+              eval $(opam env)
+              opam pin add haxe . --no-action
+              opam install haxe --deps-only --assume-depexts
+              opam list
+              opam config exec -- make -s -j`nproc` STATICLINK=1 haxe
+              opam config exec -- make -s haxelib
+              make -s package_unix
+              ls -l out
+              ldd -v ./haxe
+              ldd -v ./haxelib
+            '
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linuxArmv7Binaries
           path: out
 
   mac-build:

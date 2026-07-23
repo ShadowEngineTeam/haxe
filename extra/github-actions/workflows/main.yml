@@ -392,6 +392,70 @@ jobs:
         run: haxe RunCi.hxml
         working-directory: ${{github.workspace}}/tests
 
+  linux-armv7-build:
+    runs-on: ubuntu-22.04
+    env:
+      PLATFORM: linux-armv7
+      OPAMYES: 1
+    steps:
+      - uses: actions/checkout@main
+        with:
+          submodules: recursive
+
+      - name: Cache opam
+        uses: actions/cache@v4
+        with:
+          path: ~/opam-armv7/
+          key: armv7-${{ hashFiles('./haxe.opam', './libs/') }}-1
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm
+
+      - name: Set ADD_REVISION=1 for non-release
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        run: echo "ADD_REVISION=1" >> $GITHUB_ENV
+
+      # There is no GitHub-hosted armv7 runner, so the build runs in an
+      # arm32v7 container through QEMU user emulation. The first run is slow
+      # (the OCaml toolchain is compiled under emulation) but the opam root
+      # is cached between runs.
+      # TODO(neko): the container currently uses the Ubuntu neko package to
+      # satisfy the conf-neko opam dependency and bootstrap haxelib; switch
+      # to a Neko linux-armv7 release download once one is published.
+      - name: Build Haxe (armv7 container)
+        run: |
+          set -ex
+          mkdir -p ~/opam-armv7
+          docker run --rm --platform linux/arm/v7 \
+            -v "$PWD":/haxe -w /haxe \
+            -v ~/opam-armv7:/root/.opam \
+            -e ADD_REVISION -e OPAMYES=1 -e PLATFORM \
+            arm32v7/ubuntu:22.04 bash -ec '
+              export DEBIAN_FRONTEND=noninteractive
+              apt-get update -qqy
+              apt-get install -qqy git make patch unzip build-essential curl ca-certificates opam libpcre2-dev zlib1g-dev libmbedtls-dev neko libneko-dev ninja-build pkg-config
+              git config --global --add safe.directory /haxe
+              if [ ! -d ~/.opam/default ]; then opam init --disable-sandboxing -c 4.14.0; fi
+              eval $(opam env)
+              opam pin add haxe . --no-action
+              opam install haxe --deps-only --assume-depexts
+              opam list
+              opam config exec -- make -s -j`nproc` STATICLINK=1 haxe
+              opam config exec -- make -s haxelib
+              make -s package_unix
+              ls -l out
+              ldd -v ./haxe
+              ldd -v ./haxelib
+            '
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linuxArmv7Binaries
+          path: out
+
   mac-build:
     strategy:
       fail-fast: false
