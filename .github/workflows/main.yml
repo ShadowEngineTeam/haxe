@@ -428,7 +428,7 @@ jobs:
           path: out
 
   linux-armv7-build:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-22.04-arm
     env:
       PLATFORM: linux-armv7
       OPAMYES: 1
@@ -443,19 +443,16 @@ jobs:
           path: ~/opam-armv7/
           key: armv7-${{ env.OCAML_VERSION }}-${{ hashFiles('./haxe.opam', './libs/') }}-1
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: arm
-
       - name: Set ADD_REVISION=1 for non-release
         if: ${{ !startsWith(github.ref, 'refs/tags/') }}
         run: echo "ADD_REVISION=1" >> $GITHUB_ENV
 
       # There is no GitHub-hosted armv7 runner, so the build runs in an
-      # arm32v7 container through QEMU user emulation. The first run is slow
-      # (the OCaml toolchain is compiled under emulation) but the opam root
-      # is cached between runs.
+      # arm32v7 container on the arm64 runner. The runner CPUs (Neoverse N2)
+      # execute AArch32 user-space code natively, so no emulation is needed;
+      # if the runners ever move to CPUs without AArch32 support, add
+      # docker/setup-qemu-action back as a fallback. The opam root is cached
+      # between runs.
       # TODO(neko): the container currently uses the Ubuntu neko package to
       # satisfy the conf-neko opam dependency and bootstrap haxelib; switch
       # to a Neko linux-armv7 release download once one is published.
