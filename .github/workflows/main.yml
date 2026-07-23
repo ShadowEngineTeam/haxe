@@ -153,8 +153,17 @@ jobs:
         shell: pwsh
         run: Write-Host "::add-path::C:\ProgramData\chocolatey\bin"
 
-      # TODO(neko): install a 32-bit Neko build here once one is published
-      # (needed for haxelib bootstrapping and installer/choco packaging)
+      - name: Install Neko from GitHub releases
+        shell: pwsh
+        run: |
+          Invoke-WebRequest https://github.com/ShadowEngineTeam/neko/releases/download/v2-4-1/neko-2.4.1-win.zip -OutFile $env:RUNNER_TEMP/neko_latest.zip
+          Expand-Archive $env:RUNNER_TEMP/neko_latest.zip -DestinationPath $env:RUNNER_TEMP
+          $NEKOPATH = Get-ChildItem $env:RUNNER_TEMP/neko-*-*
+          echo "$NEKOPATH" >> $env:GITHUB_PATH
+          echo "NEKOPATH=$NEKOPATH" >> $env:GITHUB_ENV
+
+      - name: Print Neko version
+        run: neko -version 2>&1
 
       - name: Setup ocaml
         id: ocaml
@@ -233,18 +242,17 @@ jobs:
         run: |
           Set-PSDebug -Trace 1
           & "$($env:CYG_ROOT)/bin/bash.exe" @('-lc', 'cd "$OLDPWD" && opam config exec -- make -s -f Makefile.win -j`nproc` haxe 2>&1')
-          # TODO(neko): once Neko is available, also build haxelib and packages:
-          #   make -s -f Makefile.win haxelib
-          #   make -f Makefile.win echo_package_files package_bin package_installer_win package_choco
+          & "$($env:CYG_ROOT)/bin/bash.exe" @('-lc', 'cd "$OLDPWD" && opam config exec -- make -s -f Makefile.win haxelib 2>&1')
+          & "$($env:CYG_ROOT)/bin/bash.exe" @('-lc', 'cd "$OLDPWD" && opam config exec -- make -f Makefile.win echo_package_files package_bin package_installer_win package_choco 2>&1')
           & "$($env:CYG_ROOT)/bin/bash.exe" @('-lc', 'cd "$OLDPWD" && cygcheck ./haxe.exe')
+          & "$($env:CYG_ROOT)/bin/bash.exe" @('-lc', 'cd "$OLDPWD" && cygcheck ./haxelib.exe')
+          & "$($env:CYG_ROOT)/bin/bash.exe" @('-lc', 'cd "$OLDPWD" && ls ./out')
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: win${{env.ARCH}}Binaries
-          path: |
-            haxe.exe
-            std
+          path: out
 
 
   linux-build:
@@ -453,9 +461,6 @@ jobs:
       # if the runners ever move to CPUs without AArch32 support, add
       # docker/setup-qemu-action back as a fallback. The opam root is cached
       # between runs.
-      # TODO(neko): the container currently uses the Ubuntu neko package to
-      # satisfy the conf-neko opam dependency and bootstrap haxelib; switch
-      # to a Neko linux-armv7 release download once one is published.
       - name: Build Haxe (armv7 container)
         run: |
           set -ex
@@ -467,8 +472,21 @@ jobs:
             arm32v7/ubuntu:22.04 bash -ec '
               export DEBIAN_FRONTEND=noninteractive
               apt-get update -qqy
-              apt-get install -qqy git make patch unzip build-essential curl ca-certificates opam libpcre2-dev zlib1g-dev libmbedtls-dev neko libneko-dev ninja-build pkg-config
+              apt-get install -qqy git make patch unzip build-essential curl ca-certificates opam libpcre2-dev zlib1g-dev libmbedtls-dev ninja-build pkg-config
               git config --global --add safe.directory /haxe
+
+              # Install Neko from GitHub releases
+              curl -sSL https://github.com/ShadowEngineTeam/neko/releases/download/v2-4-1/neko-2.4.1-linux-armv7.tar.gz -o /tmp/neko_latest.tar.gz
+              tar -xf /tmp/neko_latest.tar.gz -C /tmp
+              NEKOPATH=$(echo /tmp/neko-*-*)
+              mkdir -p /usr/local/bin /usr/local/include /usr/local/lib/neko
+              ln -s $NEKOPATH/{neko,nekoc,nekoml,nekotools} /usr/local/bin/
+              ln -s $NEKOPATH/libneko.* /usr/local/lib/
+              ln -s $NEKOPATH/include/* /usr/local/include/
+              ln -s $NEKOPATH/*.ndll /usr/local/lib/neko/
+              ldconfig
+              neko -version 2>&1
+
               if [ ! -d ~/.opam/default ]; then opam init --disable-sandboxing -c ${{ env.OCAML_VERSION }}; fi
               eval $(opam env)
               opam pin add haxe . --no-action

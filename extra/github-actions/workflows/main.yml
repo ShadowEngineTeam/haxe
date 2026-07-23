@@ -418,9 +418,6 @@ jobs:
       # if the runners ever move to CPUs without AArch32 support, add
       # docker/setup-qemu-action back as a fallback. The opam root is cached
       # between runs.
-      # TODO(neko): the container currently uses the Ubuntu neko package to
-      # satisfy the conf-neko opam dependency and bootstrap haxelib; switch
-      # to a Neko linux-armv7 release download once one is published.
       - name: Build Haxe (armv7 container)
         run: |
           set -ex
@@ -432,8 +429,21 @@ jobs:
             arm32v7/ubuntu:22.04 bash -ec '
               export DEBIAN_FRONTEND=noninteractive
               apt-get update -qqy
-              apt-get install -qqy git make patch unzip build-essential curl ca-certificates opam libpcre2-dev zlib1g-dev libmbedtls-dev neko libneko-dev ninja-build pkg-config
+              apt-get install -qqy git make patch unzip build-essential curl ca-certificates opam libpcre2-dev zlib1g-dev libmbedtls-dev ninja-build pkg-config
               git config --global --add safe.directory /haxe
+
+              # Install Neko from GitHub releases
+              curl -sSL https://github.com/ShadowEngineTeam/neko/releases/download/v2-4-1/neko-2.4.1-linux-armv7.tar.gz -o /tmp/neko_latest.tar.gz
+              tar -xf /tmp/neko_latest.tar.gz -C /tmp
+              NEKOPATH=$(echo /tmp/neko-*-*)
+              mkdir -p /usr/local/bin /usr/local/include /usr/local/lib/neko
+              ln -s $NEKOPATH/{neko,nekoc,nekoml,nekotools} /usr/local/bin/
+              ln -s $NEKOPATH/libneko.* /usr/local/lib/
+              ln -s $NEKOPATH/include/* /usr/local/include/
+              ln -s $NEKOPATH/*.ndll /usr/local/lib/neko/
+              ldconfig
+              neko -version 2>&1
+
               if [ ! -d ~/.opam/default ]; then opam init --disable-sandboxing -c 4.14.0; fi
               eval $(opam env)
               opam pin add haxe . --no-action
