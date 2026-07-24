@@ -71,8 +71,11 @@ jobs:
           set -ex
           export PATH="$NEKOPATH:$PATH"
           git config --global --add safe.directory "$PWD"
+          # Point opam at the MSYS2 already in PATH instead of letting it
+          # download and manage its own internal Cygwin (opam's default),
+          # which cannot run MSYS2's ocaml (fails with "Unbound module Stdlib").
           # Use the MSYS2 OCaml (ocaml-system); opam only builds the libraries.
-          opam init --bare --disable-sandboxing --yes
+          opam init --bare --disable-sandboxing --cygwin-location="$(cygpath -w /)" --yes
           opam switch create . ocaml-system --no-install --yes
           eval $(opam env)
           opam install haxe --deps-only --assume-depexts --yes
