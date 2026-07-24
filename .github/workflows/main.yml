@@ -13,111 +13,83 @@ concurrency:
 
 jobs:
   windows64-build:
+    # Built under MSYS2 (UCRT64) to unify the Windows jobs on MSYS2.
+    # OCaml and the C dependencies come from MSYS2 packages; opam (which
+    # MSYS2 does not package) is fetched from its official Windows release
+    # and used only to install the OCaml libraries against the system
+    # (MSYS2) OCaml. EXPERIMENTAL: replaces the previous Cygwin/setup-ocaml
+    # recipe and needs CI verification. Installer/choco packaging is skipped
+    # for now because Makefile.win's packaging relies on Cygwin's cygcheck.
     runs-on: windows-latest
     env:
-      ACTIONS_ALLOW_UNSECURE_COMMANDS: true
       PLATFORM: windows64
       ARCH: 64
-      MINGW_ARCH: x86_64
-      CYG_ROOT: D:\cygwin
     steps:
       - uses: actions/checkout@main
         with:
           submodules: recursive
 
-      - name: choco install nsis
-        uses: nick-invision/retry@v3
+      - name: Set up MSYS2 (UCRT64)
+        uses: msys2/setup-msys2@v2
         with:
-          timeout_minutes: 10
-          max_attempts: 10
-          command: choco install --no-progress nsis.portable --version 3.09 -y
+          msystem: UCRT64
+          update: true
+          install: >-
+            git make patch diffutils tar curl unzip
+            mingw-w64-ucrt-x86_64-toolchain
+            mingw-w64-ucrt-x86_64-ocaml
+            mingw-w64-ucrt-x86_64-pcre2
+            mingw-w64-ucrt-x86_64-mbedtls
+            mingw-w64-ucrt-x86_64-zlib
 
-      - name: choco install things
-        shell: pwsh
-        run: choco install --no-progress curl wget 7zip.portable -y
-
-      - name: Prepend Chocolatey path
-        shell: pwsh
-        run: Write-Host "::add-path::C:\ProgramData\chocolatey\bin"
-
-      - name: Install Neko from GitHub releases
-        shell: pwsh
+      - name: Install Neko (win64)
+        shell: msys2 {0}
         run: |
-          Invoke-WebRequest https://github.com/ShadowEngineTeam/neko/releases/download/v2-4-1/neko-2.4.1-win64.zip -OutFile $env:RUNNER_TEMP/neko_latest.zip
-          Expand-Archive $env:RUNNER_TEMP/neko_latest.zip -DestinationPath $env:RUNNER_TEMP
-          $NEKOPATH = Get-ChildItem $env:RUNNER_TEMP/neko-*-*
-          echo "$NEKOPATH" >> $env:GITHUB_PATH
-          echo "NEKOPATH=$NEKOPATH" >> $env:GITHUB_ENV
+          set -ex
+          curl -sSL https://github.com/ShadowEngineTeam/neko/releases/download/v2-4-1/neko-2.4.1-win64.zip -o /tmp/neko.zip
+          mkdir -p /tmp/neko && unzip -q /tmp/neko.zip -d /tmp/neko
+          NEKOPATH=$(echo /tmp/neko/neko-*-*)
+          echo "NEKOPATH=$NEKOPATH" >> $GITHUB_ENV
+          "$NEKOPATH/neko" -version 2>&1 || true
 
-      - name: Print Neko version
-        run: neko -version 2>&1
-
-      - name: Setup ocaml
-      # Lock to 3.2.19 to work around an issue with 32-bit libraries getting installed
-        uses: ocaml/setup-ocaml@3d85bf33a66e089149cd1e9c75da7b9cb6d9d3a7
-        with:
-          ocaml-compiler: ${{ env.OCAML_VERSION }}
-          opam-local-packages: |
-            haxe.opam
-
-      - name: Install dependencies
-        shell: pwsh
-        env:
-          MBEDTLS_VERSION: 2.16.3
+      - name: Install opam (official Windows binary)
+        shell: msys2 {0}
         run: |
-          curl.exe -fsSL -o "libmbedtls.tar.xz" --retry 3 `
-            https://github.com/Simn/mingw64-mbedtls/releases/download/${{ env.MBEDTLS_VERSION }}/mingw64-${{ env.MINGW_ARCH }}-mbedtls-${{ env.MBEDTLS_VERSION }}-1.tar.xz
-          ${{ env.CYG_ROOT }}\bin\tar.exe -C ${{ env.CYG_ROOT }} -xvf libmbedtls.tar.xz
-
-      - name: Install Perl modules for camlp5-buildscripts
-        shell: pwsh
-        run: |
-          $env:PATH = "$env:CYG_ROOT\bin;$env:CYG_ROOT\usr\x86_64-w64-mingw32\bin;$env:PATH"
-          Invoke-WebRequest -Uri https://cpanmin.us -OutFile cpanm
-          & "$env:CYG_ROOT\bin\perl.exe" cpanm IPC::System::Simple
-          & "$env:CYG_ROOT\bin\perl.exe" cpanm String::ShellQuote
-
-      - name: Install OCaml libraries
-        uses: nick-fields/retry@v3
-        with:
-          timeout_minutes: 10
-          max_attempts: 10
-          retry_on: timeout
-          shell: pwsh
-          command: |
-            Set-PSDebug -Trace 1
-            # stop after any command returns an error
-            $PSNativeCommandUseErrorActionPreference = $true
-            $ErrorActionPreference = 'Stop'
-            # see: https://github.com/aantron/luv/issues/162
-            $env:PATH="${env:CYG_ROOT}\bin;${env:CYG_ROOT}\usr\x86_64-w64-mingw32\bin;${env:PATH}"
-            opam install haxe --deps-only
-            opam list
+          set -ex
+          curl -fsSL -o /usr/bin/opam.exe \
+            https://github.com/ocaml/opam/releases/download/2.3.0/opam-2.3.0-x86_64-windows.exe
+          opam --version
 
       - name: Set ADD_REVISION=1 for non-release
         if: ${{ !startsWith(github.ref, 'refs/tags/') }}
-        shell: pwsh
-        run: echo "ADD_REVISION=1" >> $Env:GITHUB_ENV
+        shell: msys2 {0}
+        run: echo "ADD_REVISION=1" >> $GITHUB_ENV
 
       - name: Build Haxe
-        shell: pwsh
+        shell: msys2 {0}
         run: |
-          Set-PSDebug -Trace 1
-          # stop after any command returns an error
-          $PSNativeCommandUseErrorActionPreference = $true
-          $ErrorActionPreference = 'Stop'
-          opam exec -- make -s -f Makefile.win -j"$env:NUMBER_OF_PROCESSORS" haxe
+          set -ex
+          export PATH="$NEKOPATH:$PATH"
+          git config --global --add safe.directory "$PWD"
+          # Use the MSYS2 OCaml (ocaml-system); opam only builds the libraries.
+          opam init --bare --disable-sandboxing --yes
+          opam switch create . ocaml-system --no-install --yes
+          eval $(opam env)
+          opam install haxe --deps-only --assume-depexts --yes
+          opam list
+          opam exec -- make -s -f Makefile.win -j"$(nproc)" haxe
           opam exec -- make -s -f Makefile.win haxelib
-          opam exec -- make -f Makefile.win echo_package_files package_bin package_installer_win package_choco
-          cygcheck ./haxe.exe
-          cygcheck ./haxelib.exe
-          ls ./out
+          ./haxe.exe -version
+          ldd ./haxe.exe || true
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: win${{env.ARCH}}Binaries
-          path: out
+          path: |
+            haxe.exe
+            haxelib.exe
+            std
 
 
   windows-build:
