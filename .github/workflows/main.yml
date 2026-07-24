@@ -256,120 +256,68 @@ jobs:
 
 
   windows-arm64-build:
-    # EXPERIMENTAL / non-blocking (continue-on-error).
-    # ocaml/setup-ocaml has no ARM64 Windows support — it hangs trying to
-    # build a compiler — and there is no aarch64 MinGW mbedtls prebuilt, so
-    # this recipe cannot pass as-is. The intended path is a custom toolchain
-    # built on llvm-mingw (https://github.com/mstorsjo/llvm-mingw), which
-    # does provide an aarch64-w64-mingw32 toolchain, plus a from-source
-    # OCaml + mbedtls build for that target. Until that work lands, the job
-    # is kept for tracking but must not fail the whole workflow.
-    continue-on-error: true
-    runs-on: windows-11-arm
+    # EXPERIMENTAL: cross-build Haxe for Windows ARM64 from an x64 runner.
+    #
+    # Cross vs. native only changes the host — the *target* codegen must
+    # still exist, and mainline OCaml cannot emit aarch64-Windows code yet
+    # (supported Windows targets are x86/x64 only; native ARM64 lives in
+    # dra27's experimental MSVC-based fork). llvm-mingw gives us the
+    # aarch64-w64-mingw32 C toolchain — enough to cross-build the C
+    # dependencies and stubs (this is how Neko ships win-arm64) — but not an
+    # OCaml compiler for the target. So the C side is wired up here and the
+    # job fails fast at the OCaml cross step (the one real blocker) rather
+    # than hiding the gap. It will go green once an aarch64-Windows OCaml
+    # cross toolchain is available.
+    runs-on: windows-latest
     env:
-      ACTIONS_ALLOW_UNSECURE_COMMANDS: true
       PLATFORM: windows-arm64
       ARCH: arm64
-      MINGW_ARCH: aarch64
-      CYG_ROOT: D:\cygwin
+      LLVM_MINGW_VERSION: "20250430"
     steps:
       - uses: actions/checkout@main
         with:
           submodules: recursive
 
-      - name: choco install nsis
-        uses: nick-invision/retry@v3
-        with:
-          timeout_minutes: 10
-          max_attempts: 10
-          command: choco install --no-progress nsis.portable --version 3.09 -y
-
-      - name: choco install things
+      - name: Install llvm-mingw (aarch64 cross toolchain)
         shell: pwsh
-        run: choco install --no-progress curl wget 7zip.portable -y
+        run: |
+          $ver = $env:LLVM_MINGW_VERSION
+          $url = "https://github.com/mstorsjo/llvm-mingw/releases/download/$ver/llvm-mingw-$ver-ucrt-x86_64.zip"
+          Invoke-WebRequest $url -OutFile $env:RUNNER_TEMP/llvm-mingw.zip
+          Expand-Archive $env:RUNNER_TEMP/llvm-mingw.zip -DestinationPath C:\
+          $dir = (Get-ChildItem C:\llvm-mingw-* | Select-Object -First 1).FullName
+          echo "$dir\bin" >> $env:GITHUB_PATH
+          echo "CROSS_TARGET=aarch64-w64-mingw32" >> $env:GITHUB_ENV
 
-      - name: Prepend Chocolatey path
-        shell: pwsh
-        run: Write-Host "::add-path::C:\ProgramData\chocolatey\bin"
+      - name: Print cross compiler version
+        run: aarch64-w64-mingw32-clang --version
 
-      - name: Install Neko from GitHub releases
+      - name: Install Neko (win-arm64)
         shell: pwsh
         run: |
           Invoke-WebRequest https://github.com/ShadowEngineTeam/neko/releases/download/v2-4-1/neko-2.4.1-win-arm64.zip -OutFile $env:RUNNER_TEMP/neko_latest.zip
           Expand-Archive $env:RUNNER_TEMP/neko_latest.zip -DestinationPath $env:RUNNER_TEMP
-          $NEKOPATH = Get-ChildItem $env:RUNNER_TEMP/neko-*-*
-          echo "$NEKOPATH" >> $env:GITHUB_PATH
+          $NEKOPATH = (Get-ChildItem $env:RUNNER_TEMP/neko-*-* | Select-Object -First 1).FullName
           echo "NEKOPATH=$NEKOPATH" >> $env:GITHUB_ENV
-
-      - name: Print Neko version
-        run: neko -version 2>&1
-
-      - name: Setup ocaml
-        uses: ocaml/setup-ocaml@3d85bf33a66e089149cd1e9c75da7b9cb6d9d3a7
-        with:
-          ocaml-compiler: ${{ env.OCAML_VERSION }}
-          opam-local-packages: |
-            haxe.opam
-
-      - name: Install dependencies
-        shell: pwsh
-        env:
-          MBEDTLS_VERSION: 2.16.3
-        run: |
-          # TODO(arm64): the Simn/mingw64-mbedtls releases only provide
-          # x86_64 and i686 builds. An aarch64 MinGW mbedtls build (or a
-          # from-source build in this step) is required for Windows ARM64.
-          curl.exe -fsSL -o "libmbedtls.tar.xz" --retry 3 `
-            https://github.com/Simn/mingw64-mbedtls/releases/download/${{ env.MBEDTLS_VERSION }}/mingw64-${{ env.MINGW_ARCH }}-mbedtls-${{ env.MBEDTLS_VERSION }}-1.tar.xz
-          ${{ env.CYG_ROOT }}\bin\tar.exe -C ${{ env.CYG_ROOT }} -xvf libmbedtls.tar.xz
-
-      - name: Install Perl modules for camlp5-buildscripts
-        shell: pwsh
-        run: |
-          $env:PATH = "$env:CYG_ROOT\bin;$env:CYG_ROOT\usr\$($env:MINGW_ARCH)-w64-mingw32\bin;$env:PATH"
-          Invoke-WebRequest -Uri https://cpanmin.us -OutFile cpanm
-          & "$env:CYG_ROOT\bin\perl.exe" cpanm IPC::System::Simple
-          & "$env:CYG_ROOT\bin\perl.exe" cpanm String::ShellQuote
-
-      - name: Install OCaml libraries
-        uses: nick-fields/retry@v3
-        with:
-          timeout_minutes: 10
-          max_attempts: 10
-          retry_on: timeout
-          shell: pwsh
-          command: |
-            Set-PSDebug -Trace 1
-            $PSNativeCommandUseErrorActionPreference = $true
-            $ErrorActionPreference = 'Stop'
-            # see: https://github.com/aantron/luv/issues/162
-            $env:PATH="${env:CYG_ROOT}\bin;${env:CYG_ROOT}\usr\${env:MINGW_ARCH}-w64-mingw32\bin;${env:PATH}"
-            opam install haxe --deps-only
-            opam list
 
       - name: Set ADD_REVISION=1 for non-release
         if: ${{ !startsWith(github.ref, 'refs/tags/') }}
         shell: pwsh
         run: echo "ADD_REVISION=1" >> $Env:GITHUB_ENV
 
-      - name: Build Haxe
-        shell: pwsh
+      # TODO(arm64 OCaml): the remaining blocker. Provide an OCaml compiler
+      # that targets aarch64-w64-mingw32 (e.g. dra27's experimental Windows
+      # ARM64 OCaml+opam fork, or opam-cross-windows once it gains an arm64
+      # target), then cross-build the C deps (zlib/pcre2/mbedtls) with the
+      # llvm-mingw toolchain above and run `make -f Makefile.win`.
+      - name: Cross-build Haxe (OCaml toolchain pending)
+        shell: bash
         run: |
-          Set-PSDebug -Trace 1
-          $PSNativeCommandUseErrorActionPreference = $true
-          $ErrorActionPreference = 'Stop'
-          opam exec -- make -s -f Makefile.win -j"$env:NUMBER_OF_PROCESSORS" haxe
-          opam exec -- make -s -f Makefile.win haxelib
-          opam exec -- make -f Makefile.win echo_package_files package_bin package_installer_win package_choco
-          cygcheck ./haxe.exe
-          cygcheck ./haxelib.exe
-          ls ./out
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: win${{env.ARCH}}Binaries
-          path: out
+          echo "::error::No OCaml compiler targeting aarch64-w64-mingw32 is available yet."
+          echo "llvm-mingw cross toolchain and Neko win-arm64 are installed, but"
+          echo "mainline OCaml cannot emit aarch64-Windows code. This step will"
+          echo "build Haxe once an aarch64-Windows OCaml cross toolchain lands."
+          exit 1
 
 
   linux-build:
