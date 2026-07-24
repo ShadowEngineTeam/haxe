@@ -537,7 +537,7 @@ jobs:
           # ocaml-system instead of compiling a compiler from source.
           sudo chroot rootfs env DEBIAN_FRONTEND=noninteractive apt-get install -qqy \
             build-essential make patch unzip git ca-certificates curl \
-            opam m4 cmake ninja-build pkg-config ocaml-nox \
+            opam m4 cmake ninja-build pkg-config ocaml-nox rsync \
             libpcre2-dev zlib1g-dev libmbedtls-dev
           sudo chroot rootfs apt-get clean
 
@@ -569,9 +569,13 @@ jobs:
               opam init --bare --disable-sandboxing --yes
               opam switch create system ocaml-system --yes
               eval $(opam env --switch=system)
-              # Path pin (copy the working tree) instead of a git pin, which
-              # fails to fetch the bind-mounted checkout.
-              opam pin add haxe . --no-action --yes --kind path
+              # Install deps only. Pin a throwaway dir with just the opam
+              # file so opam does not rsync the whole working tree (.git etc.)
+              # over the bind mount; opam uses rsync for path pins (installed
+              # in the root above).
+              mkdir -p /tmp/haxepin
+              cp haxe.opam /tmp/haxepin/
+              opam pin add haxe /tmp/haxepin --no-action --yes --kind path
               opam install haxe --deps-only --assume-depexts --yes
               opam list
               opam config exec -- make -s -j$(nproc) STATICLINK=1 haxe
@@ -618,7 +622,7 @@ jobs:
           # ocaml-system instead of compiling a compiler from source.
           sudo chroot rootfs env DEBIAN_FRONTEND=noninteractive apt-get install -qqy \
             build-essential make patch unzip git ca-certificates curl \
-            opam m4 cmake ninja-build pkg-config ocaml-nox \
+            opam m4 cmake ninja-build pkg-config ocaml-nox rsync \
             libpcre2-dev zlib1g-dev libmbedtls-dev
           sudo chroot rootfs apt-get clean
 
@@ -650,9 +654,13 @@ jobs:
               opam init --bare --disable-sandboxing --yes
               opam switch create system ocaml-system --yes
               eval $(opam env --switch=system)
-              # Path pin (copy the working tree) instead of a git pin, which
-              # fails to fetch the bind-mounted checkout.
-              opam pin add haxe . --no-action --yes --kind path
+              # Install deps only. Pin a throwaway dir with just the opam
+              # file so opam does not rsync the whole working tree (.git etc.)
+              # over the bind mount; opam uses rsync for path pins (installed
+              # in the root above).
+              mkdir -p /tmp/haxepin
+              cp haxe.opam /tmp/haxepin/
+              opam pin add haxe /tmp/haxepin --no-action --yes --kind path
               opam install haxe --deps-only --assume-depexts --yes
               opam list
               opam config exec -- make -s -j$(nproc) STATICLINK=1 haxe
