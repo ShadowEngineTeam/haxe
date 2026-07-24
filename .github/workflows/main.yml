@@ -256,68 +256,52 @@ jobs:
 
 
   windows-arm64-build:
-    # EXPERIMENTAL: cross-build Haxe for Windows ARM64 from an x64 runner.
-    #
-    # Cross vs. native only changes the host — the *target* codegen must
-    # still exist, and mainline OCaml cannot emit aarch64-Windows code yet
-    # (supported Windows targets are x86/x64 only; native ARM64 lives in
-    # dra27's experimental MSVC-based fork). llvm-mingw gives us the
-    # aarch64-w64-mingw32 C toolchain — enough to cross-build the C
-    # dependencies and stubs (this is how Neko ships win-arm64) — but not an
-    # OCaml compiler for the target. So the C side is wired up here and the
-    # job fails fast at the OCaml cross step (the one real blocker) rather
-    # than hiding the gap. It will go green once an aarch64-Windows OCaml
-    # cross toolchain is available.
-    runs-on: windows-latest
+    # EXPERIMENTAL SPIKE (expected to fail): try to build OCaml from source
+    # for native aarch64-Windows using MSYS2 / CLANGARM64. Mainline OCaml has
+    # no supported aarch64-Windows target and there is no usable fork, so no
+    # OCaml compiler targets this platform yet. This job attempts a
+    # bytecode-only build (bytecode needs no target codegen, so it has the
+    # best odds) to find out how far a from-source build gets and where it
+    # breaks. It is not part of the release artifacts until it yields a
+    # working compiler; subsequent steps (opam, deps, Haxe) come after.
+    runs-on: windows-11-arm
     env:
       PLATFORM: windows-arm64
       ARCH: arm64
-      LLVM_MINGW_VERSION: "20250430"
+      OCAML_SRC_VERSION: "5.3.0"
     steps:
       - uses: actions/checkout@main
         with:
           submodules: recursive
 
-      - name: Install llvm-mingw (aarch64 cross toolchain)
-        shell: pwsh
+      - name: Set up MSYS2 (CLANGARM64)
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: CLANGARM64
+          update: true
+          install: >-
+            git make patch diffutils tar curl
+            mingw-w64-clang-aarch64-toolchain
+
+      - name: Try to build OCaml from source (bytecode-first)
+        shell: msys2 {0}
         run: |
-          $ver = $env:LLVM_MINGW_VERSION
-          $url = "https://github.com/mstorsjo/llvm-mingw/releases/download/$ver/llvm-mingw-$ver-ucrt-x86_64.zip"
-          Invoke-WebRequest $url -OutFile $env:RUNNER_TEMP/llvm-mingw.zip
-          Expand-Archive $env:RUNNER_TEMP/llvm-mingw.zip -DestinationPath C:\
-          $dir = (Get-ChildItem C:\llvm-mingw-* | Select-Object -First 1).FullName
-          echo "$dir\bin" >> $env:GITHUB_PATH
-          echo "CROSS_TARGET=aarch64-w64-mingw32" >> $env:GITHUB_ENV
+          set -ex
+          ver="$OCAML_SRC_VERSION"
+          curl -LO "https://github.com/ocaml/ocaml/archive/refs/tags/${ver}.tar.gz"
+          tar xf "${ver}.tar.gz"
+          cd "ocaml-${ver}"
+          # Mainline has no aarch64-Windows native backend, so attempt a
+          # bytecode-only build (no target-specific codegen needed).
+          ./configure --disable-native-compiler --prefix=/clangarm64 CC=clang
+          make -j"$(nproc)"
+          make install
+          ocamlc -config
+          ocamlc -version
 
-      - name: Print cross compiler version
-        run: aarch64-w64-mingw32-clang --version
-
-      - name: Install Neko (win-arm64)
-        shell: pwsh
-        run: |
-          Invoke-WebRequest https://github.com/ShadowEngineTeam/neko/releases/download/v2-4-1/neko-2.4.1-win-arm64.zip -OutFile $env:RUNNER_TEMP/neko_latest.zip
-          Expand-Archive $env:RUNNER_TEMP/neko_latest.zip -DestinationPath $env:RUNNER_TEMP
-          $NEKOPATH = (Get-ChildItem $env:RUNNER_TEMP/neko-*-* | Select-Object -First 1).FullName
-          echo "NEKOPATH=$NEKOPATH" >> $env:GITHUB_ENV
-
-      - name: Set ADD_REVISION=1 for non-release
-        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
-        shell: pwsh
-        run: echo "ADD_REVISION=1" >> $Env:GITHUB_ENV
-
-      # TODO(arm64 OCaml): the remaining blocker. Provide an OCaml compiler
-      # that targets aarch64-w64-mingw32 (e.g. dra27's experimental Windows
-      # ARM64 OCaml+opam fork, or opam-cross-windows once it gains an arm64
-      # target), then cross-build the C deps (zlib/pcre2/mbedtls) with the
-      # llvm-mingw toolchain above and run `make -f Makefile.win`.
-      - name: Cross-build Haxe (OCaml toolchain pending)
-        shell: bash
-        run: |
-          echo "::error::No OCaml compiler targeting aarch64-w64-mingw32 is available yet."
-          echo "llvm-mingw cross toolchain and Neko win-arm64 are installed, but"
-          echo "mainline OCaml cannot emit aarch64-Windows code. This step will"
-          echo "build Haxe once an aarch64-Windows OCaml cross toolchain lands."
-          exit 1
+      # TODO(next): if the bytecode OCaml builds, build opam from source, then
+      # build Haxe's OCaml deps and Haxe itself (as bytecode) with the
+      # CLANGARM64 C toolchain + the win-arm64 Neko.
 
 
   linux-build:
