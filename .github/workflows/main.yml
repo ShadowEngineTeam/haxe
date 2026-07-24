@@ -255,6 +255,120 @@ jobs:
           path: out
 
 
+  windows-arm64-build:
+    # GitHub's native ARM64 Windows runner. Mirrors the windows64-build
+    # recipe. Two things still depend on ARM64 toolchain availability and
+    # may need adjustment when first run:
+    #   * ocaml/setup-ocaml must provide an aarch64 MinGW toolchain
+    #   * an ARM64 MinGW mbedtls build must be available (the Simn prebuilts
+    #     below only ship x86_64/i686 — see the TODO on that step)
+    runs-on: windows-11-arm
+    env:
+      ACTIONS_ALLOW_UNSECURE_COMMANDS: true
+      PLATFORM: windows-arm64
+      ARCH: arm64
+      MINGW_ARCH: aarch64
+      CYG_ROOT: D:\cygwin
+    steps:
+      - uses: actions/checkout@main
+        with:
+          submodules: recursive
+
+      - name: choco install nsis
+        uses: nick-invision/retry@v3
+        with:
+          timeout_minutes: 10
+          max_attempts: 10
+          command: choco install --no-progress nsis.portable --version 3.09 -y
+
+      - name: choco install things
+        shell: pwsh
+        run: choco install --no-progress curl wget 7zip.portable -y
+
+      - name: Prepend Chocolatey path
+        shell: pwsh
+        run: Write-Host "::add-path::C:\ProgramData\chocolatey\bin"
+
+      - name: Install Neko from GitHub releases
+        shell: pwsh
+        run: |
+          Invoke-WebRequest https://github.com/ShadowEngineTeam/neko/releases/download/v2-4-1/neko-2.4.1-win-arm64.zip -OutFile $env:RUNNER_TEMP/neko_latest.zip
+          Expand-Archive $env:RUNNER_TEMP/neko_latest.zip -DestinationPath $env:RUNNER_TEMP
+          $NEKOPATH = Get-ChildItem $env:RUNNER_TEMP/neko-*-*
+          echo "$NEKOPATH" >> $env:GITHUB_PATH
+          echo "NEKOPATH=$NEKOPATH" >> $env:GITHUB_ENV
+
+      - name: Print Neko version
+        run: neko -version 2>&1
+
+      - name: Setup ocaml
+        uses: ocaml/setup-ocaml@3d85bf33a66e089149cd1e9c75da7b9cb6d9d3a7
+        with:
+          ocaml-compiler: ${{ env.OCAML_VERSION }}
+          opam-local-packages: |
+            haxe.opam
+
+      - name: Install dependencies
+        shell: pwsh
+        env:
+          MBEDTLS_VERSION: 2.16.3
+        run: |
+          # TODO(arm64): the Simn/mingw64-mbedtls releases only provide
+          # x86_64 and i686 builds. An aarch64 MinGW mbedtls build (or a
+          # from-source build in this step) is required for Windows ARM64.
+          curl.exe -fsSL -o "libmbedtls.tar.xz" --retry 3 `
+            https://github.com/Simn/mingw64-mbedtls/releases/download/${{ env.MBEDTLS_VERSION }}/mingw64-${{ env.MINGW_ARCH }}-mbedtls-${{ env.MBEDTLS_VERSION }}-1.tar.xz
+          ${{ env.CYG_ROOT }}\bin\tar.exe -C ${{ env.CYG_ROOT }} -xvf libmbedtls.tar.xz
+
+      - name: Install Perl modules for camlp5-buildscripts
+        shell: pwsh
+        run: |
+          $env:PATH = "$env:CYG_ROOT\bin;$env:CYG_ROOT\usr\$($env:MINGW_ARCH)-w64-mingw32\bin;$env:PATH"
+          Invoke-WebRequest -Uri https://cpanmin.us -OutFile cpanm
+          & "$env:CYG_ROOT\bin\perl.exe" cpanm IPC::System::Simple
+          & "$env:CYG_ROOT\bin\perl.exe" cpanm String::ShellQuote
+
+      - name: Install OCaml libraries
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 10
+          max_attempts: 10
+          retry_on: timeout
+          shell: pwsh
+          command: |
+            Set-PSDebug -Trace 1
+            $PSNativeCommandUseErrorActionPreference = $true
+            $ErrorActionPreference = 'Stop'
+            # see: https://github.com/aantron/luv/issues/162
+            $env:PATH="${env:CYG_ROOT}\bin;${env:CYG_ROOT}\usr\${env:MINGW_ARCH}-w64-mingw32\bin;${env:PATH}"
+            opam install haxe --deps-only
+            opam list
+
+      - name: Set ADD_REVISION=1 for non-release
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        shell: pwsh
+        run: echo "ADD_REVISION=1" >> $Env:GITHUB_ENV
+
+      - name: Build Haxe
+        shell: pwsh
+        run: |
+          Set-PSDebug -Trace 1
+          $PSNativeCommandUseErrorActionPreference = $true
+          $ErrorActionPreference = 'Stop'
+          opam exec -- make -s -f Makefile.win -j"$env:NUMBER_OF_PROCESSORS" haxe
+          opam exec -- make -s -f Makefile.win haxelib
+          opam exec -- make -f Makefile.win echo_package_files package_bin package_installer_win package_choco
+          cygcheck ./haxe.exe
+          cygcheck ./haxelib.exe
+          ls ./out
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: win${{env.ARCH}}Binaries
+          path: out
+
+
   linux-build:
     runs-on: ubuntu-22.04
     env:
@@ -504,6 +618,75 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: linuxArmv7Binaries
+          path: out
+
+  linux32-build:
+    runs-on: ubuntu-22.04
+    env:
+      PLATFORM: linux32
+      OPAMYES: 1
+    steps:
+      - uses: actions/checkout@main
+        with:
+          submodules: recursive
+
+      - name: Cache opam
+        uses: actions/cache@v4
+        with:
+          path: ~/opam-linux32/
+          key: linux32-${{ env.OCAML_VERSION }}-${{ hashFiles('./haxe.opam', './libs/') }}-1
+
+      - name: Set ADD_REVISION=1 for non-release
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        run: echo "ADD_REVISION=1" >> $GITHUB_ENV
+
+      # GitHub has no 32-bit x86 runner, so the build runs in an i386
+      # container on the x86_64 runner. x86_64 CPUs execute 32-bit code
+      # natively, so no emulation is needed. The opam root is cached
+      # between runs.
+      - name: Build Haxe (i386 container)
+        run: |
+          set -ex
+          mkdir -p ~/opam-linux32
+          docker run --rm --platform linux/386 \
+            -v "$PWD":/haxe -w /haxe \
+            -v ~/opam-linux32:/root/.opam \
+            -e ADD_REVISION -e OPAMYES=1 -e PLATFORM \
+            i386/ubuntu:22.04 bash -ec '
+              export DEBIAN_FRONTEND=noninteractive
+              apt-get update -qqy
+              apt-get install -qqy git make patch unzip build-essential curl ca-certificates opam libpcre2-dev zlib1g-dev libmbedtls-dev ninja-build pkg-config
+              git config --global --add safe.directory /haxe
+
+              # Install Neko from GitHub releases
+              curl -sSL https://github.com/ShadowEngineTeam/neko/releases/download/v2-4-1/neko-2.4.1-linux.tar.gz -o /tmp/neko_latest.tar.gz
+              tar -xf /tmp/neko_latest.tar.gz -C /tmp
+              NEKOPATH=$(echo /tmp/neko-*-*)
+              mkdir -p /usr/local/bin /usr/local/include /usr/local/lib/neko
+              ln -s $NEKOPATH/{neko,nekoc,nekoml,nekotools} /usr/local/bin/
+              ln -s $NEKOPATH/libneko.* /usr/local/lib/
+              ln -s $NEKOPATH/include/* /usr/local/include/
+              ln -s $NEKOPATH/*.ndll /usr/local/lib/neko/
+              ldconfig
+              neko -version 2>&1
+
+              if [ ! -d ~/.opam/default ]; then opam init --disable-sandboxing -c ${{ env.OCAML_VERSION }}; fi
+              eval $(opam env)
+              opam pin add haxe . --no-action
+              opam install haxe --deps-only --assume-depexts
+              opam list
+              opam config exec -- make -s -j`nproc` STATICLINK=1 haxe
+              opam config exec -- make -s haxelib
+              make -s package_unix
+              ls -l out
+              ldd -v ./haxe
+              ldd -v ./haxelib
+            '
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux32Binaries
           path: out
 
   mac-build:
