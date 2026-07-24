@@ -412,6 +412,12 @@ jobs:
       # same approach used by the Neko CI. On the arm64 runner the armhf
       # binaries run natively; qemu-user-static provides the binfmt handler
       # as a fallback.
+      - name: Free disk space
+        run: |
+          set -x
+          sudo rm -rf /opt/hostedtoolcache /usr/share/dotnet /usr/local/lib/android /usr/share/swift || true
+          df -h /
+
       - name: Set up armhf build root
         run: |
           set -ex
@@ -419,9 +425,13 @@ jobs:
           sudo apt-get install -qqy qemu-user-static binfmt-support debootstrap
           sudo debootstrap --arch=armhf --variant=buildd \
             bookworm rootfs http://deb.debian.org/debian
+          # ocaml-nox provides the distro OCaml compiler so opam can use
+          # ocaml-system instead of compiling a compiler from source.
           sudo chroot rootfs env DEBIAN_FRONTEND=noninteractive apt-get install -qqy \
             build-essential make patch unzip git ca-certificates curl \
-            opam m4 cmake ninja-build pkg-config libpcre2-dev zlib1g-dev libmbedtls-dev
+            opam m4 cmake ninja-build pkg-config ocaml-nox \
+            libpcre2-dev zlib1g-dev libmbedtls-dev
+          sudo chroot rootfs apt-get clean
 
       - name: Build Haxe
         run: |
@@ -446,9 +456,14 @@ jobs:
               ldconfig
               neko -version
 
-              opam init --disable-sandboxing -c 4.14.0 --yes
-              eval $(opam env)
-              opam pin add haxe . --no-action --yes
+              # Use the distro OCaml (ocaml-system) so opam does not build a
+              # compiler from source (which exhausted the runner disk).
+              opam init --bare --disable-sandboxing --yes
+              opam switch create system ocaml-system --yes
+              eval $(opam env --switch=system)
+              # Path pin (copy the working tree) instead of a git pin, which
+              # fails to fetch the bind-mounted checkout.
+              opam pin add haxe . --no-action --yes --kind path
               opam install haxe --deps-only --assume-depexts --yes
               opam list
               opam config exec -- make -s -j$(nproc) STATICLINK=1 haxe
@@ -491,9 +506,13 @@ jobs:
           sudo apt-get install -qqy debootstrap
           sudo debootstrap --arch=i386 --variant=buildd \
             bookworm rootfs http://deb.debian.org/debian
+          # ocaml-nox provides the distro OCaml compiler so opam can use
+          # ocaml-system instead of compiling a compiler from source.
           sudo chroot rootfs env DEBIAN_FRONTEND=noninteractive apt-get install -qqy \
             build-essential make patch unzip git ca-certificates curl \
-            opam m4 cmake ninja-build pkg-config libpcre2-dev zlib1g-dev libmbedtls-dev
+            opam m4 cmake ninja-build pkg-config ocaml-nox \
+            libpcre2-dev zlib1g-dev libmbedtls-dev
+          sudo chroot rootfs apt-get clean
 
       - name: Build Haxe
         run: |
@@ -518,9 +537,14 @@ jobs:
               ldconfig
               neko -version
 
-              opam init --disable-sandboxing -c 4.14.0 --yes
-              eval $(opam env)
-              opam pin add haxe . --no-action --yes
+              # Use the distro OCaml (ocaml-system) so opam does not build a
+              # compiler from source.
+              opam init --bare --disable-sandboxing --yes
+              opam switch create system ocaml-system --yes
+              eval $(opam env --switch=system)
+              # Path pin (copy the working tree) instead of a git pin, which
+              # fails to fetch the bind-mounted checkout.
+              opam pin add haxe . --no-action --yes --kind path
               opam install haxe --deps-only --assume-depexts --yes
               opam list
               opam config exec -- make -s -j$(nproc) STATICLINK=1 haxe
@@ -538,12 +562,15 @@ jobs:
           path: out
 
   windows-arm64-build:
-    # GitHub's native ARM64 Windows runner. Mirrors the windows64-build
-    # recipe. Two things still depend on ARM64 toolchain availability and
-    # may need adjustment when first run:
-    #   * ocaml/setup-ocaml must provide an aarch64 MinGW toolchain
-    #   * an ARM64 MinGW mbedtls build must be available (the Simn prebuilts
-    #     only ship x86_64/i686 — build mbedtls from source here if needed)
+    # EXPERIMENTAL / non-blocking (continue-on-error).
+    # ocaml/setup-ocaml has no ARM64 Windows support — it hangs trying to
+    # build a compiler — and there is no aarch64 MinGW mbedtls prebuilt, so
+    # this recipe cannot pass as-is. The intended path is a custom toolchain
+    # built on llvm-mingw (https://github.com/mstorsjo/llvm-mingw), which
+    # does provide an aarch64-w64-mingw32 toolchain, plus a from-source
+    # OCaml + mbedtls build for that target. Until that work lands, the job
+    # is kept for tracking but must not fail the whole workflow.
+    continue-on-error: true
     runs-on: windows-11-arm
     env:
       ACTIONS_ALLOW_UNSECURE_COMMANDS: true
