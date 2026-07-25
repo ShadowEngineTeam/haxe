@@ -27,9 +27,10 @@ jobs:
           msystem: UCRT64
           update: true
           install: >-
-            git make patch diffutils tar curl unzip rsync
+            git make patch diffutils tar curl unzip rsync m4 perl
             mingw-w64-ucrt-x86_64-toolchain
             mingw-w64-ucrt-x86_64-ocaml
+            mingw-w64-ucrt-x86_64-pcre
             mingw-w64-ucrt-x86_64-pcre2
             mingw-w64-ucrt-x86_64-mbedtls
             mingw-w64-ucrt-x86_64-zlib
@@ -70,6 +71,13 @@ jobs:
           # "no arguments"; OCaml 4.14.0's runtime (interp.c) relies on the old
           # unspecified-arguments meaning and fails to compile. Build as C17.
           export CFLAGS="-std=gnu17 ${CFLAGS:-}"
+          # conf-mbedtls compiles a probe with plain gcc, which does not look in
+          # /ucrt64/include by default; CPATH makes mbedtls/version.h visible.
+          export CPATH="/ucrt64/include${CPATH:+:$CPATH}"
+          export LIBRARY_PATH="/ucrt64/lib${LIBRARY_PATH:+:$LIBRARY_PATH}"
+          # conf-perl-* probes need these Perl modules, which MSYS2 does not ship.
+          curl -fsSL https://cpanmin.us -o /tmp/cpanm
+          perl /tmp/cpanm --notest IPC::System::Simple String::ShellQuote
           git config --global --add safe.directory "$PWD"
           # Point opam at the MSYS2 already in PATH instead of letting it
           # download and manage its own internal Cygwin (opam's default).
