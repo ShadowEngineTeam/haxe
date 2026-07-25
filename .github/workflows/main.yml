@@ -101,10 +101,11 @@ jobs:
           # Point opam at the MSYS2 already in PATH instead of letting it
           # download and manage its own internal Cygwin (opam's default).
           opam init --bare --disable-sandboxing --cygwin-location="$(cygpath -w /)"
-          # Do NOT use ocaml-system: MSYS2 ships OCaml 5.4.1, which conflicts
-          # with this repo's pinned deps (haxe.opam's 4.08-5.0 branch needs
-          # ocamlfind 1.9.1, i.e. ocaml < 4.13). Build the OCaml version this
-          # repo targets instead; the MSYS2 mingw toolchain compiles it.
+          # Do NOT use ocaml-system: MSYS2 ships OCaml 5.4.1, but one of this
+          # repo's dependencies caps the compiler at ocaml < 5.0, so opam
+          # reports "No agreement on the version of ocaml". Build the OCaml
+          # version this repo targets instead; the MSYS2 mingw toolchain
+          # compiles it.
           opam switch create . ocaml-base-compiler.${{ env.OCAML_VERSION }} --no-install
           eval $(opam env)
           # Only now that the compiler itself is built: ocamlc invokes the C
