@@ -89,6 +89,9 @@ jobs:
           opam switch create . ocaml-base-compiler.4.14.0 --no-install
           eval $(opam env)
           opam install haxe --deps-only --assume-depexts
+          # luv is pinned in haxe.opam but did not end up in the switch, and
+          # src/dune needs it; install it explicitly so any failure surfaces.
+          opam install luv.0.5.14
           opam list
           opam exec -- make -s -f Makefile.win -j"$(nproc)" STATICLINK=1 haxe
           opam exec -- make -s -f Makefile.win STATICLINK=1 haxelib
@@ -169,6 +172,9 @@ jobs:
           opam switch create ${{ matrix.ocaml }}
           opam pin add haxe . --no-action
           opam install haxe --deps-only --assume-depexts
+          # luv is pinned in haxe.opam but did not end up in the switch, and
+          # src/dune needs it; install it explicitly so any failure surfaces.
+          opam install luv.0.5.14
           opam list
           ocamlopt -v
 
@@ -381,6 +387,9 @@ jobs:
           opam init
           opam pin add haxe . --no-action
           opam install haxe --deps-only --assume-depexts
+          # luv is pinned in haxe.opam but did not end up in the switch, and
+          # src/dune needs it; install it explicitly so any failure surfaces.
+          opam install luv.0.5.14
           opam list
           ocamlopt -v
 
