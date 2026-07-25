@@ -66,6 +66,10 @@ jobs:
           # and install too, and plain --yes does not answer them.
           export OPAMCONFIRMLEVEL=unsafe-yes
           export OPAMYES=1
+          # MSYS2's GCC 15 defaults to C23, where an empty parameter list means
+          # "no arguments"; OCaml 4.14.0's runtime (interp.c) relies on the old
+          # unspecified-arguments meaning and fails to compile. Build as C17.
+          export CFLAGS="-std=gnu17 ${CFLAGS:-}"
           git config --global --add safe.directory "$PWD"
           # Point opam at the MSYS2 already in PATH instead of letting it
           # download and manage its own internal Cygwin (opam's default).
