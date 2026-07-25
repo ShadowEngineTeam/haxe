@@ -62,15 +62,19 @@ jobs:
         run: |
           set -ex
           export PATH="$NEKOPATH:$PATH"
+          # Apply to every opam call: depext prompts appear in switch create
+          # and install too, and plain --yes does not answer them.
+          export OPAMCONFIRMLEVEL=unsafe-yes
+          export OPAMYES=1
           git config --global --add safe.directory "$PWD"
           # Point opam at the MSYS2 already in PATH instead of letting it
           # download and manage its own internal Cygwin (opam's default),
           # which cannot run MSYS2's ocaml (fails with "Unbound module Stdlib").
           # Use the MSYS2 OCaml (ocaml-system); opam only builds the libraries.
-          opam init --bare --disable-sandboxing --cygwin-location="$(cygpath -w /)" --confirm-level=unsafe-yes
-          opam switch create . ocaml-system --no-install --yes
+          opam init --bare --disable-sandboxing --cygwin-location="$(cygpath -w /)"
+          opam switch create . ocaml-system --no-install
           eval $(opam env)
-          opam install haxe --deps-only --assume-depexts --yes
+          opam install haxe --deps-only --assume-depexts
           opam list
           opam exec -- make -s -f Makefile.win -j"$(nproc)" haxe
           opam exec -- make -s -f Makefile.win haxelib
