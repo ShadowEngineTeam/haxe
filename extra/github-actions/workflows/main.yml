@@ -82,11 +82,6 @@ jobs:
           export PATH="/tmp/ccshim:$PATH"
           gcc --version | head -1
           export CFLAGS="-std=gnu17 ${CFLAGS:-}"
-          # ocamlc calls the C compiler by absolute path (baked in at build
-          # time), so CC/CFLAGS/PATH shims never reach it. OCAMLPARAM is
-          # injected into every ocamlc invocation, which is what finally puts
-          # -std=gnu17 on the custom-runtime compiles (dune bootstrap, Haxe).
-          export OCAMLPARAM='_,ccopt=-std=gnu17'
           # conf-mbedtls compiles a probe with plain gcc, which does not look in
           # /ucrt64/include by default; CPATH makes mbedtls/version.h visible.
           export CPATH="/ucrt64/include${CPATH:+:$CPATH}"
@@ -104,6 +99,12 @@ jobs:
           # repo targets instead; the MSYS2 mingw toolchain compiles it.
           opam switch create . ocaml-base-compiler.4.14.0 --no-install
           eval $(opam env)
+          # Only now that the compiler itself is built: ocamlc invokes the C
+          # compiler by absolute path, so CC/CFLAGS/PATH shims never reach the
+          # custom-runtime compiles (dune bootstrap, Haxe). OCAMLPARAM does,
+          # but it must NOT be set while ocaml-base-compiler builds - it breaks
+          # flexlink during the compiler's own bootstrap.
+          export OCAMLPARAM='_,ccopt=-std=gnu17'
           # Pin the local package first: without this, opam resolves "haxe"
           # from the opam repository (the published 4.1.1) and installs ITS
           # dependency versions - e.g. extlib 1.7.7, while this tree needs
