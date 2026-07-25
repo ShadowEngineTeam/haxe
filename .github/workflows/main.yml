@@ -74,6 +74,11 @@ jobs:
           # and install too, and plain --yes does not answer them.
           export OPAMCONFIRMLEVEL=unsafe-yes
           export OPAMYES=1
+          # opam is a native Windows binary, so ocaml.exe spawned by it cannot
+          # resolve MSYS2's POSIX stdlib path (/ucrt64/lib/ocaml) and fails with
+          # "Unbound module Stdlib". Give it a Windows-form OCAMLLIB.
+          export OCAMLLIB="$(cygpath -w /ucrt64/lib/ocaml)"
+          ocamlc -where || true
           git config --global --add safe.directory "$PWD"
           # Point opam at the MSYS2 already in PATH instead of letting it
           # download and manage its own internal Cygwin (opam's default),
