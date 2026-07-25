@@ -67,15 +67,21 @@ jobs:
           # and install too, and plain --yes does not answer them.
           export OPAMCONFIRMLEVEL=unsafe-yes
           export OPAMYES=1
-          # Use MSYS2's own OCaml (ocaml-system) rather than building
-          # ocaml-base-compiler 4.14: MSYS2 builds its OCaml 5.4 with the same
-          # GCC 15, so it is already C23-clean. That removes the whole
-          # -std=gnu17 problem (OCaml 4.14's runtime, dune's bootstrap and the
-          # custom-runtime links all broke under GCC 15's C23 default).
-          # opam runs ocaml.exe outside the MSYS2 shell, so point it at the
-          # stdlib explicitly or it fails with "Unbound module Stdlib".
-          export OCAMLLIB="$(cygpath -w /ucrt64/lib/ocaml)"
-          ocamlc -version
+          # MSYS2's GCC 15 defaults to C23, where an empty parameter list means
+          # "no arguments"; OCaml 4.14 and the custom runtimes ocamlc generates
+          # (dune's bootstrap, Haxe's own link) rely on the old meaning.
+          # CC/CFLAGS do not survive opam's build environment, so shim gcc
+          # itself: a wrapper earlier in PATH forces -std=gnu17 on every C
+          # compile, whoever invokes it.
+          mkdir -p /tmp/ccshim
+          for cc in gcc x86_64-w64-mingw32-gcc cc; do
+            printf '#!/bin/sh\nexec /ucrt64/bin/%s -std=gnu17 "$@"\n' \
+              "$([ $cc = cc ] && echo gcc || echo $cc)" > "/tmp/ccshim/$cc"
+            chmod +x "/tmp/ccshim/$cc"
+          done
+          export PATH="/tmp/ccshim:$PATH"
+          gcc --version | head -1
+          export CFLAGS="-std=gnu17 ${CFLAGS:-}"
           # conf-mbedtls compiles a probe with plain gcc, which does not look in
           # /ucrt64/include by default; CPATH makes mbedtls/version.h visible.
           export CPATH="/ucrt64/include${CPATH:+:$CPATH}"
@@ -87,13 +93,18 @@ jobs:
           # Point opam at the MSYS2 already in PATH instead of letting it
           # download and manage its own internal Cygwin (opam's default).
           opam init --bare --disable-sandboxing --cygwin-location="$(cygpath -w /)"
-          # Pin BEFORE creating the switch: haxe.opam allows ocaml >= 5.0 with
-          # unconstrained camlp5/ocamlfind, which is what makes MSYS2's OCaml
-          # 5.4 usable. (The earlier "No agreement on the version of ocaml"
-          # was opam resolving the published haxe 4.1.1, which only has the
-          # 4.08-5.0 branch pinning ocamlfind 1.9.1 -> ocaml < 4.13.)
-          opam switch create . ocaml-system --no-install
+          # Do NOT use ocaml-system: MSYS2 ships OCaml 5.4.1, which conflicts
+          # with this repo's pinned deps (haxe.opam's 4.08-5.0 branch needs
+          # ocamlfind 1.9.1, i.e. ocaml < 4.13). Build the OCaml version this
+          # repo targets instead; the MSYS2 mingw toolchain compiles it.
+          opam switch create . ocaml-base-compiler.4.14.0 --no-install
           eval $(opam env)
+          # Only now that the compiler itself is built: ocamlc invokes the C
+          # compiler by absolute path, so CC/CFLAGS/PATH shims never reach the
+          # custom-runtime compiles (dune bootstrap, Haxe). OCAMLPARAM does,
+          # but it must NOT be set while ocaml-base-compiler builds - it breaks
+          # flexlink during the compiler's own bootstrap.
+          export OCAMLPARAM='_,ccopt=-std=gnu17'
           # Pin the local package first: without this, opam resolves "haxe"
           # from the opam repository (the published 4.1.1) and installs ITS
           # dependency versions - e.g. extlib 1.7.7, while this tree needs
