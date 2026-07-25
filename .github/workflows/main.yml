@@ -354,9 +354,6 @@ jobs:
           opam update
           opam pin add haxe . --no-action
           opam install haxe --deps-only --assume-depexts
-          # luv is pinned in haxe.opam but did not end up in the switch, and
-          # src/dune needs it; install it explicitly so any failure surfaces.
-          opam install luv.0.5.14
           opam list
           ocamlopt -v
 
@@ -454,9 +451,6 @@ jobs:
           opam init -c ${{ env.OCAML_VERSION }}
           opam pin add haxe . --no-action
           opam install haxe --deps-only --assume-depexts
-          # luv is pinned in haxe.opam but did not end up in the switch, and
-          # src/dune needs it; install it explicitly so any failure surfaces.
-          opam install luv.0.5.14
           opam list
           ocamlopt -v
 
@@ -749,9 +743,6 @@ jobs:
           eval $(opam env)
           opam pin add haxe . --no-action
           opam install haxe --deps-only --assume-depexts
-          # luv is pinned in haxe.opam but did not end up in the switch, and
-          # src/dune needs it; install it explicitly so any failure surfaces.
-          opam install luv.0.5.14
           opam list
           ocamlopt -v
 
