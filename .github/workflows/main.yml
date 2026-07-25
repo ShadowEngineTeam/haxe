@@ -74,18 +74,15 @@ jobs:
           # and install too, and plain --yes does not answer them.
           export OPAMCONFIRMLEVEL=unsafe-yes
           export OPAMYES=1
-          # opam is a native Windows binary, so ocaml.exe spawned by it cannot
-          # resolve MSYS2's POSIX stdlib path (/ucrt64/lib/ocaml) and fails with
-          # "Unbound module Stdlib". Give it a Windows-form OCAMLLIB.
-          export OCAMLLIB="$(cygpath -w /ucrt64/lib/ocaml)"
-          ocamlc -where || true
           git config --global --add safe.directory "$PWD"
           # Point opam at the MSYS2 already in PATH instead of letting it
-          # download and manage its own internal Cygwin (opam's default),
-          # which cannot run MSYS2's ocaml (fails with "Unbound module Stdlib").
-          # Use the MSYS2 OCaml (ocaml-system); opam only builds the libraries.
+          # download and manage its own internal Cygwin (opam's default).
           opam init --bare --disable-sandboxing --cygwin-location="$(cygpath -w /)"
-          opam switch create . ocaml-system --no-install
+          # Do NOT use ocaml-system: MSYS2 ships OCaml 5.4.1, which conflicts
+          # with this repo's pinned deps (haxe.opam's 4.08-5.0 branch needs
+          # ocamlfind 1.9.1, i.e. ocaml < 4.13). Build the OCaml version this
+          # repo targets instead; the MSYS2 mingw toolchain compiles it.
+          opam switch create . ocaml-base-compiler.${{ env.OCAML_VERSION }} --no-install
           eval $(opam env)
           opam install haxe --deps-only --assume-depexts
           opam list
