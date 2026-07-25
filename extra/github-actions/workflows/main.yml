@@ -82,9 +82,10 @@ jobs:
           eval $(opam env)
           opam install haxe --deps-only --assume-depexts
           opam list
-          opam exec -- make -s -f Makefile.win -j"$(nproc)" haxe
-          opam exec -- make -s -f Makefile.win haxelib
+          opam exec -- make -s -f Makefile.win -j"$(nproc)" STATICLINK=1 haxe
+          opam exec -- make -s -f Makefile.win STATICLINK=1 haxelib
           ./haxe.exe -version
+          # Statically linked: should list no mingw pcre2/zlib/mbedtls DLLs.
           ldd ./haxe.exe || true
 
       - name: Upload artifact
