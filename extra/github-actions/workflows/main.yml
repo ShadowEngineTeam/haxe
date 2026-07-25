@@ -88,10 +88,12 @@ jobs:
           # repo targets instead; the MSYS2 mingw toolchain compiles it.
           opam switch create . ocaml-base-compiler.4.14.0 --no-install
           eval $(opam env)
+          # Pin the local package first: without this, opam resolves "haxe"
+          # from the opam repository (the published 4.1.1) and installs ITS
+          # dependency versions - e.g. extlib 1.7.7, while this tree needs
+          # >= 1.7.8 for ExtString's labelled starts_with/ends_with.
+          opam pin add haxe . --no-action --kind path
           opam install haxe --deps-only --assume-depexts
-          # luv is pinned in haxe.opam but did not end up in the switch, and
-          # src/dune needs it; install it explicitly so any failure surfaces.
-          opam install luv.0.5.14
           opam list
           opam exec -- make -s -f Makefile.win -j"$(nproc)" STATICLINK=1 haxe
           opam exec -- make -s -f Makefile.win STATICLINK=1 haxelib
